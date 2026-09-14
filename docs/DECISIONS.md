@@ -183,3 +183,45 @@ Raison : la consigne Phase 6 est explicite ("cette detection de conflit ne doit 
 Decision : les blocs `AutopilotBlock`, `EntraBlock` et `IntuneBlock` affichent un niveau de detail asymetrique selon le service ayant servi d'ancrage (ex. un ancrage Autopilot donne un profil de deploiement complet mais un bloc Entra allege ; un ancrage Entra donne l'inverse) plutot que d'emettre des appels Graph additionnels pour "completer" les blocs les moins riches.
 
 Raison : consigne explicite de la Phase 6 ("N'ajoute pas de nouveaux appels Graph pour enrichir ces cartes"). Completer systematiquement chaque bloc au niveau de detail maximal aurait multiplie le nombre d'appels Graph par recherche (jusqu'a un appel beta supplementaire pour le profil Autopilot a chaque fois), ce qui contredit la discipline de performance demandee (reutiliser les objets deja recuperes, jamais dupliquer un appel). L'asymetrie est un compromis assume : l'utilisateur qui a besoin du detail manquant peut l'obtenir en un clic via le lien "Ouvrir dans <module>" (qui reutilise l'identifiant deja resolu, sans nouvelle saisie).
+
+## D033 - PyInstaller sans alternative serieuse envisagee
+
+Decision : le packaging Windows (Phase 7) utilise PyInstoller (onefile, `console=False`), configure via `packaging/windows/EndpointToolbox.spec`.
+
+Raison : deja largement utilise pour des applications PySide6/Qt desktop, avec des hooks officiels integres pour PySide6 et, via `pyinstaller-hooks-contrib`, des hooks communautaires pour pandas/openpyxl (evite d'ecrire et maintenir des `hiddenimports` manuels pour des bibliotheques volumineuses). Aucune incompatibilite avec ce projet n'a ete identifiee lors du build structurel effectue sur macOS (voir `docs/PACKAGING.md`, "Build reellement effectue") : la consigne explicite etait de choisir PyInstoller "sauf incompatibilite demontree", et aucune ne l'a ete.
+
+## D034 - Nouveau module `app/core/paths.py`, seul point de contact avec `sys.frozen`/`sys._MEIPASS`
+
+Decision : toute resolution de chemin dependant du mode d'execution (developpement vs execute par PyInstoller) passe par `app/core/paths.py` (`is_frozen`, `frozen_resource_root`, `resource_path`, `user_data_dir`, `user_log_dir`). Aucun autre fichier du projet ne lit `sys.frozen` ou `sys._MEIPASS` directement.
+
+Raison : consigne explicite de la Phase 7 ("Ne disperse pas `sys._MEIPASS` partout dans le code"). Centraliser ce mecanisme signifie qu'ajouter une future ressource embarquee (icone, template) ou changer de strategie PyInstoller (onefile vers onedir, par exemple) ne necessite de modifier qu'un seul fichier plutot que de retrouver chaque site d'appel disperse.
+
+## D035 - `GraphConfigStore` utilise `user_data_dir()`, macOS/Linux inchanges, Windows sur `%APPDATA%`
+
+Decision : `app/graph/config.py` calcule desormais `CONFIG_DIR` via `app.core.paths.user_data_dir()` au lieu d'un `Path.home() / ".endpoint_toolbox"` code en dur. La fonction retourne `%APPDATA%\EndpointToolbox` sur Windows (repli `~\AppData\Roaming\EndpointToolbox` si `APPDATA` est absent de l'environnement) et conserve `~/.endpoint_toolbox` a l'identique sur macOS et Linux.
+
+Raison : consigne explicite ("Preferer `%APPDATA%\EndpointToolbox\`... Preserver le fonctionnement macOS/Linux existant si possible"). Le format du fichier JSON et son contenu (Tenant ID, Client ID, seuil stale device - jamais le Client Secret) restent inchanges ; seul l'emplacement racine change, et uniquement sur Windows. `GraphConfigStore` continue d'accepter un `Path` explicite en parametre (deja le cas avant cette phase), donc aucun test existant n'a eu besoin d'etre modifie.
+
+## D036 - Filet de securite `app/core/logging_setup.py` : infrastructure, pas une fonctionnalite
+
+Decision : introduction d'un `RotatingFileHandler` minimal (fichier unique `endpoint_toolbox.log`, 1 Mo x 3, sous `user_log_dir()`) et d'un `sys.excepthook` qui journalise toute exception non interceptee, active des le demarrage par `main.py`. Aucune journalisation des appels Graph, aucune donnee applicative, aucun secret n'y transite.
+
+Raison : `EndpointToolbox.exe` est compile avec `console=False` (consigne explicite "aucune fenetre console visible") - sans ce filet, un crash au demarrage sur le poste d'un utilisateur serait invisible et impossible a diagnostiquer a distance, ce qui aurait rendu la Phase 7 incomplete au sens pratique. Ce n'est pas une fonctionnalite metier (aucune regle Intune/Autopilot/Entra/Workspace n'y touche, aucun appel Graph n'y transite) : c'est une infrastructure de packaging, au meme titre que `app/core/paths.py`. Perimetre volontairement minimal : pas de rotation configurable, pas de niveau de log ajustable par l'utilisateur, pas de journalisation des appels Graph (deja couverts par les Diagnostics in-app existants).
+
+## D037 - `app/version.py` comme source unique de version, distincte des marqueurs `APP_VERSION` des Support Bundle
+
+Decision : nouveau fichier `app/version.py` (`__version__ = "0.7.0"`), utilise uniquement pour les metadonnees de l'executable Windows (`packaging/windows/version_info.txt`). Les constantes `APP_VERSION = "phase-N"` deja presentes dans `app/intune/support_bundle.py`, `app/autopilot/support_bundle.py`, `app/entra/support_bundle.py` et `app/workspace/support_bundle.py` ne sont pas modifiees.
+
+Raison : consigne explicite ("Ajouter une gestion propre de version si elle n'existe pas"). Une version applicative unifiee et les marqueurs de phase par module repondent a des besoins differents : la premiere identifie l'executable distribue, les seconds identifient quel module a produit un Support Bundle donne (utile pour le support technique, sans rapport avec le packaging). Les fusionner aurait couple deux concepts independants et oblige a modifier quatre fichiers metier pour une tache de packaging pure - contraire a la consigne "ne modifie pas les regles Intune/Autopilot/Entra/Workspace".
+
+## D038 - Aucune icone inventee ; mecanisme d'ajout prepare uniquement
+
+Decision : `packaging/windows/EndpointToolbox.spec` verifie la presence de `resources/windows/app.ico` a la compilation (`Path.exists()`) et l'attache a l'executable seulement si le fichier existe reellement dans le depot ; en son absence, l'executable est compile avec l'icone par defaut de PyInstoller.
+
+Raison : consigne explicite ("Si une icone existe reellement, l'utiliser. Sinon ne genere pas arbitrairement une identite visuelle definitive"). Aucune icone Endpoint Toolbox n'existe dans ce depot a ce jour ; en creer une aurait fixe une identite visuelle non demandee et potentiellement a refaire.
+
+## D039 - Pas de signature de code dans cette phase
+
+Decision : `EndpointToolbox.exe` n'est pas signe numeriquement. `docs/PACKAGING.md` documente explicitement que Windows SmartScreen avertira au premier lancement.
+
+Raison : consigne explicite ("Ne signe pas numeriquement l'executable dans cette phase si aucun certificat de signature n'existe"). Aucun certificat de signature de code n'existe pour ce projet ; signer sans certificat reel est impossible, et en simuler un aurait ete une invention masquant une limitation reelle a l'utilisateur.

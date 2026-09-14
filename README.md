@@ -2,7 +2,7 @@
 
 Endpoint Toolbox est une application desktop Python/PySide6 pour les ingenieurs Endpoint et Microsoft 365.
 
-La Phase 2 ajoute une fondation Microsoft Graph strictement read-only et un premier outil Intune Device Inspector. La Phase 2.5 refond l'UX autour d'une interface plus simple, Figma-inspired, avec disclosure progressif. La Phase 3 transforme l'inspection en Device Health read-only multi-source. La Phase 4 ajoute un Autopilot Troubleshooter read-only. La Phase 5 ajoute un Entra ID Inspector (devices) read-only. La Phase 6 ajoute une vue "Appareil" (Device Workspace) read-only qui unifie Autopilot, Entra ID et Intune pour un meme poste.
+La Phase 2 ajoute une fondation Microsoft Graph strictement read-only et un premier outil Intune Device Inspector. La Phase 2.5 refond l'UX autour d'une interface plus simple, Figma-inspired, avec disclosure progressif. La Phase 3 transforme l'inspection en Device Health read-only multi-source. La Phase 4 ajoute un Autopilot Troubleshooter read-only. La Phase 5 ajoute un Entra ID Inspector (devices) read-only. La Phase 6 ajoute une vue "Appareil" (Device Workspace) read-only qui unifie Autopilot, Entra ID et Intune pour un meme poste. La Phase 7 prepare un packaging Windows portable (`EndpointToolbox.exe`, sans fonctionnalite metier nouvelle).
 
 ## Perimetre actuel
 
@@ -107,6 +107,18 @@ Workflow :
 
 La vue Appareil n'introduit aucune nouvelle permission, aucun nouvel endpoint et aucun nouvel appel beta : elle orchestre uniquement les trois modules Autopilot, Entra ID et Intune deja existants.
 
+## Version Windows portable
+
+Endpoint Toolbox peut etre compile en `EndpointToolbox.exe` autonome (Windows 11 x64), sans installation Python/pip requise sur le poste cible :
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1
+```
+
+Le script installe les dependances, lance les tests, puis compile via PyInstoller (`packaging/windows/EndpointToolbox.spec`). Doit s'executer sur Windows - PyInstoller ne cross-compile pas. Configuration et logs vont dans `%APPDATA%\EndpointToolbox\` (jamais a cote de l'executable) ; le Client Secret reste dans Windows Credential Manager, jamais dans `graph_config.json`. Detail complet, metadonnees de l'executable et checklist de validation manuelle Windows 11 : `docs/PACKAGING.md`.
+
+**Aucun build Windows reel n'a ete effectue a ce jour** (prepare et teste structurellement sur macOS uniquement) - voir `docs/PACKAGING.md` et `NEXT.md`.
+
 ## Tests
 
 ```bash
@@ -130,3 +142,4 @@ Avec le virtualenv local :
 - `docs/SECURITY.md` : posture securite.
 - `docs/DEVELOPMENT.md` : guide de reprise.
 - `docs/TESTING.md` : strategie de tests.
+- `docs/PACKAGING.md` : packaging Windows portable (PyInstoller, chemins frozen, Credential Manager, checklist de validation).

@@ -136,6 +136,24 @@
 - [x] Refresh read-only, asynchrone, meme mecanisme que Device Inspector/Autopilot/Entra.
 - [x] Panne partielle de n'importe laquelle des trois sources (401/403/404/429/5xx) sans jamais casser la vue consolidee.
 
+## Phase 7 - Packaging Windows (application portable)
+
+- [x] Outil PyInstoller choisi et configure (`packaging/windows/EndpointToolbox.spec`, onefile, `console=False`).
+- [x] `app/core/paths.py` : resolution dev/frozen centralisee (`is_frozen`, `resource_path`, `user_data_dir`, `user_log_dir`).
+- [x] Configuration Windows deplacee vers `%APPDATA%\EndpointToolbox\graph_config.json` ; macOS/Linux inchanges (`~/.endpoint_toolbox/`).
+- [x] Credential Manager Windows : aucun changement de mecanisme (`keyring` deja cross-platform) ; backends declares explicitement dans le `.spec` pour rester decouvrables une fois fige.
+- [x] `app/core/logging_setup.py` : filet de securite minimal (fichier de log tournant + `sys.excepthook`), sous `%APPDATA%\EndpointToolbox\logs\` (Windows) / `~/.endpoint_toolbox/logs/` (macOS/Linux). Aucune donnee Graph ni secret journalisee.
+- [x] `app/version.py` : source unique de version pour les metadonnees de l'executable.
+- [x] Metadonnees EXE (Product Name, File Description, version) ; aucun Company/Publisher invente.
+- [x] Mecanisme d'icone prepare (`resources/windows/app.ico` si present) ; aucune icone inventee.
+- [x] Aucune signature de code ; SmartScreen documente comme comportement attendu.
+- [x] `scripts/build_windows.ps1` : build reproductible (venv, dependances, tests, `compileall`, PyInstoller), refuse de s'executer hors Windows.
+- [x] `.github/workflows/windows-build.yml` : workflow manuel (`workflow_dispatch`), aucun secret, aucune Release publiee.
+- [x] 31 tests dedies (chemins dev/frozen, Credential Manager via faux backend, absence du secret dans `graph_config.json` et dans les logs).
+- [x] `.gitignore` mis a jour : `build/`, `dist/`, `*.exe` ignores ; `packaging/windows/EndpointToolbox.spec` explicitement tracke.
+- [ ] Build Windows reel effectue : **non**, prepare et teste structurellement sur macOS uniquement (PyInstoller ne cross-compile pas).
+- [ ] Validation manuelle Windows 11 (checklist `docs/PACKAGING.md`) : **non effectuee**.
+
 ## Hors perimetre actuel
 
 - [ ] Application Deployment Monitoring complet.
@@ -151,3 +169,6 @@
 - [ ] Conditional Access.
 - [ ] Licences, logs de connexion utilisateur.
 - [ ] Toute action Intune, Entra ou Autopilot en ecriture.
+- [ ] Installateur MSI, auto-mise-a-jour, publication Microsoft Store.
+- [ ] Signature de code de l'executable.
+- [ ] Packaging Intune Win32 app / deploiement SCCM.

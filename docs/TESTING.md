@@ -174,12 +174,44 @@ Device Workspace (`tests/test_workspace.py`) :
 - Support Bundle "Appareil" : sept sections JSON attendues, sanitisation (secrets/tokens absents y compris dans le raw JSON de chaque source), nom de fichier `EndpointToolbox-Appareil-{nom}-{timestamp}.zip`, export non destructif ;
 - Refresh read-only reutilisant le meme mecanisme asynchrone que les trois pages specialisees.
 
+Packaging Windows (Phase 7) :
+
+`tests/test_paths.py` (12 tests) :
+
+- `is_frozen()` false en developpement, true quand PyInstoller pose `sys.frozen` ;
+- `frozen_resource_root()` utilise `sys._MEIPASS` s'il existe, sinon le dossier de l'executable (onedir) ;
+- `resource_path()` resout correctement en mode dev et en mode frozen (simule) ;
+- `user_data_dir()` : `%APPDATA%\EndpointToolbox` sur Windows simule (avec et sans `APPDATA` dans l'environnement), `~/.endpoint_toolbox` inchange sur macOS/Linux simules ;
+- l'emplacement de configuration n'est jamais un sous-dossier du dossier de l'executable frozen ;
+- `user_log_dir()` est bien `user_data_dir()/logs`.
+
+`tests/test_secrets.py` (10 tests), via un faux backend keyring en memoire (aucun vrai Keychain/Credential Manager n'est touche) :
+
+- secret present (aller-retour set/get), absent (aucune exception), supprime, mis a jour (ecrasement) ;
+- isolation des secrets entre tenant/client differents ;
+- rejet d'un secret vide ;
+- Credential Manager inaccessible (`SecureStorageUnavailable`) sur `get_secret`, `set_secret` et `delete_secret`.
+
+`tests/test_config_store.py` (6 tests) :
+
+- aller-retour save/load de Tenant ID, Client ID et seuil stale device ;
+- `load()` retourne `None` si le fichier n'existe pas, `clear()` supprime le fichier (idempotent) ;
+- le fichier ecrit ne contient jamais le mot "secret" ni un champ autre que `tenant_id`/`client_id`/`stale_device_days` ;
+- `CONFIG_DIR` derive bien de `app.core.paths.user_data_dir()`.
+
+`tests/test_logging_setup.py` (3 tests) :
+
+- creation du dossier et du fichier de log sous `user_log_dir()` ;
+- idempotence (`configure_logging()` appele deux fois n'ajoute pas de handler en double) ;
+- aucune occurrence du mot "secret" dans le fichier de log apres usage normal.
+
 ## Gaps connus
 
 - Pas encore de tests UI automatises : le build PySide6 local ne fournit pas de plugin platform `offscreen` ou `minimal`.
-- Pas encore de validation Windows Credential Manager automatisee.
-- Pas encore de tests contre un tenant de sandbox reel (Intune, Entra ID et Autopilot). Aucune App Registration n'existe encore cote tenant au 2026-09-14 ; toute la couverture Phase 1 a 6 (159 tests au total) repose sur des transports/clients Graph factices.
+- Pas encore de validation Windows Credential Manager automatisee (les tests `test_secrets.py` valident `GraphSecretStore` via un faux backend, pas `keyring.backends.Windows.WinVaultKeyring` reel).
+- Pas encore de tests contre un tenant de sandbox reel (Intune, Entra ID et Autopilot). Aucune App Registration n'existe encore cote tenant au 2026-09-14 ; toute la couverture Phase 1 a 7 (190 tests au total) repose sur des transports/clients Graph factices.
 - Pas encore de tests UI automatises pour Refresh et tabs Device Inspector / Autopilot / Entra ID / Appareil ; la logique sous-jacente est couverte par tests metier mockes.
 - Autopilot specifiquement non valide contre un vrai tenant : recherche multi-identifiant, `contains(serialNumber, ...)` avec des serials reels, appel beta du profil, et surtout le risque de faux positif documente sur `identifier_mismatch` (voir `docs/GRAPH_PERMISSIONS.md`, section Validation tenant reel).
 - Entra ID specifiquement non valide contre un vrai tenant : recherche par `displayName` (egalite exacte - comportement reel non confirme), `deviceId eq` sur devices, et la definition du seuil "stale" a 90 jours (jamais confrontee a des dates de connexion reelles).
 - Device Workspace herite integralement des inconnues de validation d'Autopilot et d'Entra ID ci-dessus, puisqu'il ne fait qu'orchestrer ces deux modules et Intune ; aucun comportement de resolution/priorisation propre au Workspace n'a ete confronte a un tenant reel non plus (voir `docs/GRAPH_PERMISSIONS.md`, section Validation tenant reel).
+- Packaging Windows (Phase 7) : aucun build Windows reel n'a ete effectue (PyInstoller ne cross-compile pas depuis macOS/Linux) ; seul un build structurel macOS a ete verifie (voir `docs/PACKAGING.md`, "Build reellement effectue"). La checklist de validation manuelle Windows 11 (`docs/PACKAGING.md`) n'a pas ete executee.

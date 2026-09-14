@@ -23,6 +23,8 @@ Endpoint Toolbox est une application desktop locale pour preparer, inspecter et 
 - `app/autopilot` : services et modeles metier Autopilot Troubleshooter read-only (Phase 4).
 - `app/entra` : services et modeles metier Entra ID Inspector read-only (Phase 5).
 - `app/workspace` : couche d'orchestration "Appareil" (Phase 6), compose Intune/Autopilot/Entra sans dupliquer leurs regles.
+- `app/core` : infrastructure de packaging transverse (Phase 7) - resolution de chemins dev/frozen, filet de securite de journalisation. Aucune logique metier.
+- `app/version.py` : source unique de la version applicative (metadonnees de l'executable Windows).
 - `app/ui/components.py` : composants visuels reutilisables.
 - `app/ui/styles.py` : feuille de style centralisee et design tokens pratiques.
 - `tests` : tests pytest sans tenant Microsoft reel.
@@ -48,9 +50,9 @@ Ce POST est limite a l'obtention du token et n'est pas une operation Graph. Les 
 
 ## Configuration et secrets
 
-`GraphConfigStore` stocke localement Tenant ID, Client ID et seuil stale device dans `~/.endpoint_toolbox/graph_config.json`.
+`GraphConfigStore` stocke localement Tenant ID, Client ID et seuil stale device dans un dossier resolu par `app.core.paths.user_data_dir()` (Phase 7) : `~/.endpoint_toolbox/graph_config.json` sur macOS/Linux (inchange), `%APPDATA%\EndpointToolbox\graph_config.json` sur Windows.
 
-`GraphSecretStore` stocke le Client Secret via `keyring` dans le gestionnaire de secrets du systeme. Aucun fallback plaintext n'est autorise.
+`GraphSecretStore` stocke le Client Secret via `keyring` dans le gestionnaire de secrets du systeme (Keychain macOS, Windows Credential Manager, backend Linux configure). Aucun fallback plaintext n'est autorise.
 
 L'architecture prevoit une evolution vers plusieurs profils ou certificat, mais Phase 2 garde un profil simple.
 
@@ -226,3 +228,16 @@ Selon l'ancre retenue, chaque module correle deja les deux autres a des degres d
 ### Conflits d'identifiants
 
 `ResolvedIdentity` fusionne les valeurs (serial, nom, deviceId Entra) rapportees par plusieurs sources : si toutes concordent (apres normalisation trim/casse), une seule valeur est retenue avec sa source ; si elles divergent, un `IdentityConflict` liste toutes les valeurs concurrentes avec leur source, sans jamais en cacher une. Cette detection est purement presentationnelle : elle ne remplace pas et ne duplique pas la regle `identifier_mismatch` d'Autopilot, qui reste la seule a produire une issue avec severite sur ce sujet.
+
+## Packaging Windows (Phase 7)
+
+Reference complete dans `docs/PACKAGING.md`. Cette phase n'ajoute aucune fonctionnalite metier ni aucune regle Intune/Autopilot/Entra/Workspace ; elle ajoute uniquement de l'infrastructure de packaging :
+
+- `app/core/paths.py` : seul point de contact avec `sys.frozen`/`sys._MEIPASS`. Expose `is_frozen()`, `resource_path()` (prepare mais non consomme aujourd'hui - aucune ressource embarquee n'existe encore), `user_data_dir()` et `user_log_dir()`.
+- `app/core/logging_setup.py` : filet de securite minimal (fichier de log tournant + `sys.excepthook`), necessaire car l'executable Windows est compile sans console (`console=False`) - sans cela, un crash serait invisible.
+- `app/version.py` : source unique de version, utilisee uniquement par les metadonnees de l'executable Windows.
+- `app/graph/config.py` : `CONFIG_DIR` derive maintenant de `user_data_dir()` au lieu d'un chemin code en dur ; comportement macOS/Linux inchange, nouveau comportement Windows (`%APPDATA%\EndpointToolbox`).
+- `app/graph/secrets.py` : **inchange** - `keyring` selectionnait deja le bon backend par OS ; seule la configuration PyInstoller (`packaging/windows/EndpointToolbox.spec`) a du declarer explicitement les backends `keyring` pour qu'ils restent decouvrables une fois l'application figee.
+- `packaging/windows/EndpointToolbox.spec`, `packaging/windows/version_info.txt`, `requirements-build.txt`, `scripts/build_windows.ps1`, `.github/workflows/windows-build.yml`, `resources/windows/README.md` : configuration de build, hors de l'arborescence `app/`.
+
+Voir DECISIONS.md D033-D039 pour le detail de chaque choix.

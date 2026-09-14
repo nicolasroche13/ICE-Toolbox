@@ -108,7 +108,24 @@ Statut : implemente (tests mockes uniquement). **Validation contre un tenant Mic
 - Aucune permission Graph supplementaire, aucun nouvel endpoint, aucun nouvel appel beta.
 - 28 tests dedies (recherche par chaque identifiant, combinaisons de sources presentes/absentes, pannes partielles 403/429/5xx, ambiguite, conflit d'identifiants, UNKNOWN, consolidation, Support Bundle, Refresh).
 
-## Phase 7 - Entra ID au-dela de l'inspection device (hors perimetre actuel)
+## Phase 7 - Packaging Windows (application portable) read-only
+
+Statut : packaging prepare et teste structurellement (macOS) ; **build Windows reel non effectue et validation Windows 11 reelle non effectuee**. Voir `docs/PACKAGING.md` (checklist complete) et `NEXT.md`. Aucune fonctionnalite metier, aucune permission Graph, aucune ecriture Graph n'a ete ajoutee - strictement du packaging.
+
+- Outil : PyInstoller (onefile, `console=False`), configure dans `packaging/windows/EndpointToolbox.spec` ; choix documente en DECISIONS.md D033.
+- `app/core/paths.py` (nouveau) : resolution dev/frozen centralisee, seul point de contact avec `sys.frozen`/`sys._MEIPASS` (D034). `resource_path()` est prepare mais non consomme - aucune ressource embarquee n'existe aujourd'hui.
+- Configuration Windows deplacee vers `%APPDATA%\EndpointToolbox\graph_config.json` (D035) ; comportement macOS/Linux (`~/.endpoint_toolbox/`) explicitement preserve a l'identique.
+- Credential Manager Windows : aucun changement de mecanisme necessaire (`keyring` route deja automatiquement vers `WinVaultKeyring`) ; le `.spec` declare explicitement les backends `keyring` pour qu'ils restent decouvrables une fois l'executable fige.
+- `app/core/logging_setup.py` (nouveau) : filet de securite minimal (fichier de log tournant + `sys.excepthook`), necessaire car l'executable est sans console (D036). Aucune donnee Graph ni secret n'y transite.
+- `app/version.py` (nouveau) : source unique de version pour les metadonnees de l'executable (D037), independante des marqueurs `APP_VERSION` par module deja existants.
+- Icone : mecanisme d'ajout prepare (`resources/windows/app.ico` si present), aucune icone inventee (D038).
+- Aucune signature de code (D039) ; SmartScreen avertira au premier lancement, documente comme comportement attendu.
+- `scripts/build_windows.ps1` : build reproductible (venv, dependances, tests, `compileall`, PyInstoller), refuse de s'executer hors Windows.
+- `.github/workflows/windows-build.yml` : workflow manuel (`workflow_dispatch` uniquement), aucun secret, aucune publication de Release.
+- 31 tests dedies (`tests/test_paths.py`, `tests/test_secrets.py`, `tests/test_config_store.py`, `tests/test_logging_setup.py`) : resolution de chemins dev/frozen, comportements du Credential Manager (present/absent/supprime/mis a jour/indisponible), absence du secret dans `graph_config.json` et dans les logs.
+- Build reellement effectue : **structurel, sur macOS uniquement** (PyInstoller ne cross-compile pas un `.exe` Windows). Aucun `.exe` Windows n'a ete produit ni teste sur un poste Windows 11 reel.
+
+## Phase 8 - Entra ID au-dela de l'inspection device (hors perimetre actuel)
 
 - User Inspector.
 - Group Inspector.

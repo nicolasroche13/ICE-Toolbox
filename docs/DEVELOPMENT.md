@@ -18,6 +18,14 @@ pip install -r requirements.txt
 python main.py
 ```
 
+## Build Windows portable (Phase 7)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1
+```
+
+Doit s'executer sur Windows (PyInstoller ne cross-compile pas). Le script cree/reutilise `.venv`, installe `requirements.txt` + `requirements-build.txt`, lance les tests et `compileall`, puis PyInstoller via `packaging/windows/EndpointToolbox.spec`. Resultat : `dist/EndpointToolbox.exe`. Detail complet, checklist de validation manuelle Windows 11 et limitations : `docs/PACKAGING.md`.
+
 ## Configuration App Registration
 
 1. Microsoft Entra admin center > App registrations > New registration.
@@ -57,6 +65,9 @@ Ne jamais committer Tenant ID, Client ID reel ou Client Secret.
 - `app/ui/main_window.py` : pages Settings, Intune, Autopilot, Entra ID, Appareil (Device Workspace) et Deployment Tools.
 - `app/ui/components.py` : cards, status badges, search boxes, collapsible sections et composants communs.
 - `app/ui/styles.py` : QSS centralisee pour le langage visuel.
+- `app/core/paths.py` : resolution de chemins dev/frozen (Phase 7) ; seul module autorise a lire `sys.frozen`/`sys._MEIPASS`.
+- `app/core/logging_setup.py` : filet de securite minimal (Phase 7), fichier de log tournant + `sys.excepthook`.
+- `app/version.py` : source unique de version applicative (Phase 7).
 
 ## Regles de contribution
 
@@ -121,3 +132,12 @@ Pour etendre la vue "Appareil" (Phase 6) :
 3. Avant de modifier l'ordre de resolution d'identite (GUID : Intune -> Autopilot -> Entra ; texte : Autopilot serial -> Intune nom), relire D029 et D030 - l'ordre actuel n'est pas arbitraire, il compense un angle mort connu de la recherche par nom d'Autopilot.
 4. `IdentityConflict` reste une aide de presentation (badge), jamais une source de severite ; ne pas la fusionner avec `identifier_mismatch` (D031).
 5. Toute extension multi-device (historique, favoris, dashboard, comparaison, export CSV) est explicitement hors perimetre de Phase 6 et necessite une discussion explicite avant implementation.
+
+## Reprendre le packaging Windows (Phase 7)
+
+1. Toute resolution de chemin dependant du mode d'execution passe par `app/core/paths.py` - ne jamais lire `sys.frozen`/`sys._MEIPASS` ailleurs dans le code (D034).
+2. Si une ressource embarquee est ajoutee (icone, template, donnee statique), la resoudre via `app.core.paths.resource_path()` plutot qu'un chemin relatif ou `Path(__file__)` - le mecanisme existe deja, non consomme aujourd'hui faute de ressource a embarquer.
+3. En cas de bump de version, mettre a jour `app/version.py` **et** `packaging/windows/version_info.txt` (les deux fichiers sont independants par necessite technique - voir D037).
+4. Avant d'ajouter une nouvelle dependance runtime (`requirements.txt`), verifier qu'un hook PyInstoller existe (integre ou via `pyinstaller-hooks-contrib`) ; sinon, `packaging/windows/EndpointToolbox.spec` devra declarer explicitement les `hiddenimports`/`datas` necessaires, comme deja fait pour `keyring.backends`.
+5. Ne jamais stocker de configuration ou de secret a cote de l'executable (`sys.executable`) : toujours via `app.core.paths.user_data_dir()` (configuration) ou `keyring` (secret).
+6. Relire `docs/PACKAGING.md` avant toute modification du `.spec` ou du script de build - il documente le detail de chaque choix et la checklist de validation manuelle Windows 11 a refaire.
