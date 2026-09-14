@@ -16,8 +16,8 @@ def generate_device_issues(health: DeviceHealth, *, stale_device_days: int = 7) 
         issues.append(
             DeviceIssue(
                 "CRITICAL",
-                "Device is non-compliant",
-                f"Compliance state returned by Intune: {device.compliance_state}",
+                "Appareil non conforme",
+                f"Etat de conformite renvoye par Intune : {device.compliance_state}",
                 "Intune managedDevice.complianceState",
                 id="intune.non_compliant",
                 evidence=str(device.compliance_state),
@@ -33,8 +33,8 @@ def generate_device_issues(health: DeviceHealth, *, stale_device_days: int = 7) 
         issues.append(
             DeviceIssue(
                 "WARNING",
-                "Entra correlation ambiguous",
-                "Multiple Entra devices matched the Intune Azure AD device identifier. No device was selected automatically.",
+                "Correlation Entra ambigue",
+                "Plusieurs appareils Entra correspondent a l'identifiant Azure AD Intune. Aucun appareil n'a ete choisi automatiquement.",
                 "Entra device.deviceId",
                 id="entra.ambiguous",
                 evidence=f"{entra_status.object_count} matches",
@@ -50,8 +50,8 @@ def generate_device_issues(health: DeviceHealth, *, stale_device_days: int = 7) 
         issues.append(
             DeviceIssue(
                 "WARNING",
-                "Intune device found but Entra device not found",
-                "The Intune managedDevice has an Entra device ID, but no matching directory device was returned.",
+                "Appareil Intune trouve mais appareil Entra introuvable",
+                "Le managedDevice Intune possede un identifiant Entra, mais aucun appareil correspondant n'a ete renvoye par l'annuaire.",
                 "Intune managedDevice.azureADDeviceId / Entra device.deviceId",
                 id="entra.not_found",
                 evidence=device.entra_device_id,
@@ -62,8 +62,8 @@ def generate_device_issues(health: DeviceHealth, *, stale_device_days: int = 7) 
         issues.append(
             DeviceIssue(
                 "ERROR",
-                "Device disabled in Entra ID",
-                "Entra ID reports accountEnabled = false.",
+                "Appareil desactive dans Entra ID",
+                "Entra ID indique accountEnabled = false.",
                 "Entra device.accountEnabled",
                 id="entra.disabled",
                 evidence="accountEnabled=false",
@@ -74,8 +74,8 @@ def generate_device_issues(health: DeviceHealth, *, stale_device_days: int = 7) 
         issues.append(
             DeviceIssue(
                 "WARNING",
-                "Device not encrypted",
-                "Intune reports isEncrypted = false.",
+                "Appareil non chiffre",
+                "Intune indique isEncrypted = false.",
                 "Intune managedDevice.isEncrypted",
                 id="intune.not_encrypted",
                 evidence="isEncrypted=false",
@@ -88,8 +88,8 @@ def generate_device_issues(health: DeviceHealth, *, stale_device_days: int = 7) 
         issues.append(
             DeviceIssue(
                 "WARNING",
-                "No primary user",
-                "No primary user or UPN was returned by Graph.",
+                "Aucun utilisateur principal",
+                "Aucun utilisateur principal ni UPN n'a ete renvoye par Graph.",
                 "Intune managedDevice.users / userPrincipalName",
                 id="intune.no_user",
                 evidence="No users returned",
@@ -100,8 +100,8 @@ def generate_device_issues(health: DeviceHealth, *, stale_device_days: int = 7) 
         issues.append(
             DeviceIssue(
                 "WARNING",
-                "Missing serial number",
-                "Serial number is missing from Intune managedDevice.",
+                "Numero de serie manquant",
+                "Le numero de serie est absent du managedDevice Intune.",
                 "Intune managedDevice.serialNumber",
                 id="intune.missing_serial",
                 evidence="serialNumber is empty",
@@ -112,8 +112,8 @@ def generate_device_issues(health: DeviceHealth, *, stale_device_days: int = 7) 
         issues.append(
             DeviceIssue(
                 "INFO",
-                "Missing model or manufacturer",
-                "Manufacturer or model is missing from Intune managedDevice.",
+                "Modele ou fabricant manquant",
+                "Le fabricant ou le modele est absent du managedDevice Intune.",
                 "Intune managedDevice.manufacturer/model",
                 id="intune.missing_hardware",
                 evidence=f"manufacturer={device.manufacturer or 'missing'}, model={device.model or 'missing'}",
@@ -124,8 +124,8 @@ def generate_device_issues(health: DeviceHealth, *, stale_device_days: int = 7) 
         issues.append(
             DeviceIssue(
                 "WARNING",
-                "OS information missing",
-                "Operating system or OS version is missing.",
+                "Informations OS manquantes",
+                "Le systeme d'exploitation ou sa version est manquant(e).",
                 "Intune managedDevice.operatingSystem/osVersion",
                 id="intune.missing_os",
                 evidence=f"os={device.operating_system or 'missing'}, version={device.os_version or 'missing'}",
@@ -139,8 +139,8 @@ def generate_device_issues(health: DeviceHealth, *, stale_device_days: int = 7) 
         issues.append(
             DeviceIssue(
                 "ERROR",
-                "One or more application install failures",
-                f"{len(failed_apps)} application(s) report an install failure.",
+                "Un ou plusieurs echecs d'installation d'application",
+                f"{len(failed_apps)} application(s) signalent un echec d'installation.",
                 "Intune application status",
                 id="apps.install_failed",
                 evidence=", ".join(app.name for app in failed_apps[:5]),
@@ -165,8 +165,8 @@ def _stale_check_in_issue(device: ManagedDevice, *, stale_device_days: int) -> D
         return None
     return DeviceIssue(
         "WARNING",
-        f"Last check-in {age_days} days ago",
-        f"Threshold configured: {stale_device_days} days",
+        f"Dernier check-in il y a {age_days} jours",
+        f"Seuil configure : {stale_device_days} jours",
         "Intune managedDevice.lastSyncDateTime",
         id="intune.stale_check_in",
         evidence=device.last_sync_datetime,
@@ -186,8 +186,8 @@ def _very_old_enrollment_issue(device: ManagedDevice, *, stale_device_days: int)
         return None
     return DeviceIssue(
         "WARNING",
-        "Very old enrollment with no recent check-in",
-        f"Enrolled {enrollment_age} days ago and last check-in was {check_in_age} days ago.",
+        "Inscription tres ancienne sans check-in recent",
+        f"Inscrit il y a {enrollment_age} jours, dernier check-in il y a {check_in_age} jours.",
         "Intune managedDevice.enrolledDateTime/lastSyncDateTime",
         id="intune.old_enrollment_stale",
         evidence=f"enrolled={device.enrolled_datetime}, lastSync={device.last_sync_datetime}",
@@ -226,7 +226,7 @@ def parse_application_status(raw: dict[str, Any], *, kind: str = "detected_app")
     )
     return ApplicationStatus(
         id=str(raw.get("id") or raw.get("applicationId") or raw.get("detectedAppId") or ""),
-        name=str(raw.get("displayName") or raw.get("applicationName") or raw.get("name") or "Unknown application"),
+        name=str(raw.get("displayName") or raw.get("applicationName") or raw.get("name") or "Application inconnue"),
         version=_optional(raw.get("version") or raw.get("displayVersion")),
         install_state=_normalize_install_state(str(install_state)),
         kind="deployment_status" if kind == "deployment_status" else "detected_app",

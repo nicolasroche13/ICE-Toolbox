@@ -18,18 +18,18 @@ def parse_graph_datetime(value: str | None) -> datetime | None:
 def relative_datetime(value: str | None, *, now: datetime | None = None) -> str:
     parsed = parse_graph_datetime(value)
     if not parsed:
-        return "Not available"
+        return "Non disponible"
     current = now or datetime.now(timezone.utc)
     seconds = int((current - parsed).total_seconds())
-    suffix = "ago" if seconds >= 0 else "from now"
+    suffix = "il y a" if seconds >= 0 else "dans"
     seconds = abs(seconds)
     if seconds < 60:
-        return f"{seconds} seconds {suffix}"
+        return f"{suffix} {seconds} secondes"
     minutes = seconds // 60
     if minutes < 60:
-        return f"{minutes} minutes {suffix}"
+        return f"{suffix} {minutes} minutes"
     hours = minutes // 60
     if hours < 48:
-        return f"{hours} hours {suffix}"
+        return f"{suffix} {hours} heures"
     days = hours // 24
-    return f"{days} days {suffix}"
+    return f"{suffix} {days} jours"

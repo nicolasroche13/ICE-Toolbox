@@ -212,7 +212,7 @@ class IntuneDeviceInspectorService:
         compliance = ComplianceSummary(
             state=device.compliance_state,
             grace_period_expiration_datetime=_optional(device.raw.get("complianceGracePeriodExpirationDateTime")),
-            detail="Detailed reason not available through the current Graph endpoint.",
+            detail="Raison detaillee non disponible via l'endpoint Graph actuel.",
             raw={
                 "complianceState": device.compliance_state,
                 "complianceGracePeriodExpirationDateTime": device.raw.get("complianceGracePeriodExpirationDateTime"),
@@ -285,7 +285,7 @@ def parse_managed_device(
 ) -> ManagedDevice:
     device = ManagedDevice(
         id=str(raw.get("id") or ""),
-        device_name=str(raw.get("deviceName") or "Not available"),
+        device_name=str(raw.get("deviceName") or "Non disponible"),
         entra_device_id=_optional(raw.get("azureADDeviceId")),
         serial_number=_optional(raw.get("serialNumber")),
         manufacturer=_optional(raw.get("manufacturer")),
@@ -318,7 +318,7 @@ def detect_device_issues(device: ManagedDevice, *, stale_device_days: int = 7) -
 def _parse_search_result(raw: dict[str, Any]) -> DeviceSearchResult:
     return DeviceSearchResult(
         id=str(raw.get("id") or ""),
-        device_name=str(raw.get("deviceName") or "Not available"),
+        device_name=str(raw.get("deviceName") or "Non disponible"),
         serial_number=_optional(raw.get("serialNumber")),
         user_principal_name=_optional(raw.get("userPrincipalName")),
         model=_optional(raw.get("model")),
@@ -380,35 +380,35 @@ def _source_error_status(name: str, endpoint: str, exc: GraphError) -> SourceSta
 def _build_capabilities(sources: tuple[SourceStatus, ...]) -> tuple[Capability, ...]:
     source_by_name = {source.name: source for source in sources}
     definitions = [
-        ("Intune Device", "Device identity", "Intune managedDevice"),
-        ("Primary users", "Primary user", "Primary users"),
-        ("Entra Device", "Entra correlation", "Entra device"),
-        ("Compliance", "Device compliance state", "Compliance"),
-        ("Detected Apps", "Detected applications inventory", "Applications"),
-        ("Deployment Status", "Application deployment status", "Application failures"),
+        ("Intune Device", "Identite de l'appareil", "Intune managedDevice"),
+        ("Primary users", "Utilisateur principal", "Primary users"),
+        ("Entra Device", "Correlation Entra", "Entra device"),
+        ("Compliance", "Etat de conformite de l'appareil", "Compliance"),
+        ("Detected Apps", "Inventaire des applications detectees", "Applications"),
+        ("Deployment Status", "Statut de deploiement applicatif", "Application failures"),
     ]
     capabilities: list[Capability] = []
     for name, feature, source_name in definitions:
         source = source_by_name.get(source_name)
         if source is None:
             state = "UNAVAILABLE"
-            reason = "Source was not queried or no reliable identifier was available."
+            reason = "La source n'a pas ete interrogee ou aucun identifiant fiable n'etait disponible."
             required_permission = _required_permission(source_name)
         elif source.permission_missing:
             state = "PERMISSION_MISSING"
-            reason = source.error or "Microsoft Graph returned 403."
+            reason = source.error or "Microsoft Graph a renvoye 403."
             required_permission = source.required_permission
         elif not source.available and source.status_code == 404:
             state = "API_UNAVAILABLE"
-            reason = source.error or "Microsoft Graph returned 404."
+            reason = source.error or "Microsoft Graph a renvoye 404."
             required_permission = source.required_permission
         elif not source.available:
             state = "ERROR"
-            reason = source.error or "Source failed."
+            reason = source.error or "Echec de la source."
             required_permission = source.required_permission
         elif source_name == "Application failures":
             state = "PARTIAL"
-            reason = "Deployment status is limited to troubleshooting events returned by Graph."
+            reason = "Le statut de deploiement se limite aux evenements de troubleshooting renvoyes par Graph."
             required_permission = source.required_permission
         else:
             state = "AVAILABLE"
@@ -419,9 +419,9 @@ def _build_capabilities(sources: tuple[SourceStatus, ...]) -> tuple[Capability, 
         Capability(
             name="Autopilot",
             state="UNAVAILABLE",
-            feature="Autopilot inspection",
+            feature="Inspection Autopilot",
             source="Not implemented",
-            reason="Not implemented in Phase 3.1",
+            reason="Non implemente en Phase 3.1",
         )
     )
     return tuple(capabilities)

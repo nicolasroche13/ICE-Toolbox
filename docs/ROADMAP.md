@@ -61,10 +61,23 @@ Statut : implemente.
 - Dates Graph toujours normalisees en UTC ; une date sans fuseau n'est plus interpretee dans le fuseau local de la machine.
 - Tests supplementaires realistes : doublons, ambiguite Entra, 403/404 partiels, dates nulles/timezone, compliance/encryption manquantes vs false, endpoint beta indisponible, sanitisation du support bundle.
 
-## Phase 4 - Autopilot read-only
+## Phase 4 - Autopilot Troubleshooter read-only
 
-- Autopilot Inspector.
-- Fleet Health.
+Statut : implemente (tests mockes uniquement). **Validation contre un tenant Microsoft reel non effectuee** : aucune App Registration n'existe encore cote tenant au 2026-09-14. Voir `docs/GRAPH_PERMISSIONS.md` (section Validation tenant reel) pour le detail et le protocole a suivre des qu'un tenant sera disponible.
+
+- Module `app/autopilot/` (models, health, inspector, support_bundle) independant de l'UI, meme architecture que Device Health.
+- Recherche multi-identifiant (serial en priorite, Autopilot ID, Managed Device ID, Entra Device ID, nom de poste), toujours ramenee a un numero de serie pour interroger `windowsAutopilotDeviceIdentities`.
+- Correlation Intune (`managedDeviceId`) et Entra ID (`azureADDeviceId` / `azureActiveDirectoryDeviceId`) reutilisant les mecanismes Phase 3.1 : pas de selection arbitraire, doublons geres, devices renommes non ambigus (correlation par ID, pas par nom).
+- Profil de deploiement assigne (nom, type, etat et date d'assignation) lu via le seul appel beta du module, isole et avec repli propre ; jamais deduit d'une appartenance a un groupe.
+- 10 regles Autopilot Health deterministes (`autopilot_not_registered`, `profile_not_assigned`, `profile_assignment_failed`, `intune_device_missing`, `entra_device_missing`, `correlation_ambiguous`, `entra_device_disabled`, `intune_device_stale`, `identifier_mismatch`, `critical_data_unavailable`), UNKNOWN != FALSE verifie par tests.
+- Cinq capacites supplementaires sur le modele a six etats existant.
+- Page Autopilot complete : synthese immediate, chaine visuelle, problemes detectes en priorite, sections Vue d'ensemble/Autopilot/Intune/Entra ID/Donnees brutes/Diagnostics, Support Bundle dedie, Refresh asynchrone.
+- 34 tests dedies (recherche, correlation, profil, panne partielle, sanitisation du support bundle).
+
+## Phase 4+ - Autopilot au-dela du troubleshooting (hors perimetre actuel)
+
+- Autopilot Import / modification Group Tag / suppression / assignation de profil (ecriture, hors perimetre read-only).
+- Fleet Health (vue agregee multi-device).
 - Analyse de deploiement.
 
 ## Phase 5 - Entra ID read-only

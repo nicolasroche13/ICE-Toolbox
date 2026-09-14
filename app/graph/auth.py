@@ -22,7 +22,7 @@ class ClientCredentialsAuth:
         if self._token and not self._token.is_expired():
             return self._token.access_token
         if not self.settings.is_configured or not self.secret:
-            raise GraphConfigurationError("Tenant ID, Client ID and Client Secret are required.")
+            raise GraphConfigurationError("Tenant ID, Client ID et Client Secret sont requis.")
 
         response = self.transport.request(
             "POST",
@@ -37,12 +37,12 @@ class ClientCredentialsAuth:
             timeout=30,
         )
         if response.status_code >= 400:
-            raise GraphAuthenticationError("OAuth2 client credentials flow failed.", status_code=response.status_code)
+            raise GraphAuthenticationError("Echec du flux OAuth2 client credentials.", status_code=response.status_code)
         payload = response.json()
         access_token = payload.get("access_token")
         expires_in = int(payload.get("expires_in", 3600))
         if not access_token:
-            raise GraphAuthenticationError("OAuth2 response did not contain an access token.")
+            raise GraphAuthenticationError("La reponse OAuth2 ne contient pas d'access token.")
         self._token = Token(
             access_token=str(access_token),
             expires_at=datetime.now(timezone.utc) + timedelta(seconds=max(60, expires_in - 120)),

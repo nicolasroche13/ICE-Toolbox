@@ -58,15 +58,15 @@ class GraphReadOnlyClient:
     ) -> GraphResponse:
         method = method.upper()
         if method not in READ_ONLY_METHODS:
-            raise GraphReadOnlyViolation(f"HTTP {method} is blocked by the read-only Graph client.")
+            raise GraphReadOnlyViolation(f"La methode HTTP {method} est bloquee par le client Graph en lecture seule.")
         if cancellation and cancellation.cancelled:
-            raise GraphNetworkError("Request cancelled before start.")
+            raise GraphNetworkError("Requete annulee avant demarrage.")
 
         url = self._url(path_or_url)
         attempt = 0
         while True:
             if cancellation and cancellation.cancelled:
-                raise GraphNetworkError("Request cancelled.")
+                raise GraphNetworkError("Requete annulee.")
             token = self.auth.get_token()
             response = self.transport.request(
                 method,
@@ -130,7 +130,7 @@ class GraphReadOnlyClient:
         )
         if response.status_code in {200, 201, 204}:
             return GraphResponse(payload, log)
-        message = _graph_error_message(payload) or f"Graph returned HTTP {response.status_code}."
+        message = _graph_error_message(payload) or f"Graph a renvoye le statut HTTP {response.status_code}."
         error_kwargs = dict(
             details=message,
             request_id=log.request_id,

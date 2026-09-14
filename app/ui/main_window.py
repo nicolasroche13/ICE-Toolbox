@@ -48,6 +48,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.autopilot.inspector import AutopilotInspectorService
+from app.autopilot.models import AutopilotDeviceHealth, AutopilotInspectorResult, AutopilotSearchResult
+from app.autopilot.support_bundle import export_autopilot_support_bundle
 from app.config.settings import DEFAULT_PREVIEW_ROWS, DEFAULT_RANDOM_SEED, DEFAULT_RING_COLUMN
 from app.deployment.ring_builder import (
     apply_exclusions,
@@ -60,7 +63,7 @@ from app.graph.auth import ClientCredentialsAuth
 from app.graph.client import GraphReadOnlyClient
 from app.graph.config import GraphConfigStore
 from app.graph.errors import GraphError, SecureStorageUnavailable
-from app.graph.factory import build_intune_device_inspector
+from app.graph.factory import build_autopilot_inspector, build_intune_device_inspector
 from app.graph.models import GraphRequestLog, GraphSettings
 from app.graph.secrets import GraphSecretStore
 from app.intune.device_inspector import IntuneDeviceInspectorService
@@ -140,9 +143,9 @@ class DropZone(QFrame):
         self.setObjectName("dropZone")
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignCenter)
-        title = QLabel("Drop CSV/XLSX/XLSM here")
+        title = QLabel("Deposez un fichier CSV/XLSX/XLSM ici")
         title.setObjectName("emptyTitle")
-        subtitle = QLabel("or choose a file")
+        subtitle = QLabel("ou choisissez un fichier")
         subtitle.setObjectName("muted")
         layout.addWidget(title)
         layout.addWidget(subtitle)
@@ -168,7 +171,7 @@ def clear_layout(layout) -> None:
 
 def not_available(value: object) -> str:
     if value is None or value == "":
-        return "Not available"
+        return "Non disponible"
     return str(value)
 
 
@@ -178,6 +181,89 @@ def make_scroll_page(content: QWidget) -> QScrollArea:
     scroll.setFrameShape(QFrame.NoFrame)
     scroll.setWidget(content)
     return scroll
+
+
+def _find_source_for_title(title: str, sources) -> object | None:
+    return next((item for item in sources if title.casefold().startswith(item.name.split()[0].casefold())), None)
+
+
+def _raw_payload_with_metadata(title: str, payload: object, sources) -> dict[str, object]:
+    source = _find_source_for_title(title, sources) if sources else None
+    return {
+        "metadata": {
+            "source": title,
+            "endpoint": source.endpoint if source else None,
+            "api_version": source.api_version if source else None,
+            "status": source.status_code if source else None,
+            "timestamp": source.response_date if source else None,
+            "request_id": source.request_id if source else None,
+        },
+        "json": payload,
+    }
+
+
+def _build_diagnostics_text(capabilities, sources, logs) -> str:
+    lines: list[str] = []
+    if capabilities:
+        lines.append("Capacites")
+        for capability in capabilities:
+            extra = f" · Permission requise : {capability.required_permission}" if capability.required_permission else ""
+            reason = f" · {capability.reason}" if capability.reason else ""
+            lines.append(f"{capability.name}: {capability.state}{extra}{reason}")
+        lines.append("")
+    for source in sources:
+        state = "OK" if source.available else "Unavailable"
+        if source.permission_missing:
+            state = "Permission missing"
+        lines.append(f"{source.name}: {state}")
+        lines.append(f"API : {source.api_version}")
+        lines.append(f"Endpoint : {source.endpoint}")
+        lines.append(f"Status HTTP : {not_available(source.status_code)}")
+        lines.append(f"Duree : {source.duration_ms} ms")
+        lines.append(f"Objets retournes : {not_available(source.object_count)}")
+        lines.append(f"Capacite : {state.upper().replace(' ', '_')}")
+        if source.required_permission:
+            lines.append(f"Permission requise : {source.required_permission}")
+        if source.request_id:
+            lines.append(f"request-id: {source.request_id}")
+        if source.client_request_id:
+            lines.append(f"client-request-id: {source.client_request_id}")
+        if source.response_date:
+            lines.append(f"date: {source.response_date}")
+        if source.error:
+            lines.append(f"Erreur : {source.error}")
+        lines.append("")
+    for log in logs:
+        source_name = getattr(log, "source", "Graph")
+        lines.append(f"Source : {source_name}")
+        lines.append(f"API : {getattr(log, 'api_version', 'v1.0')}")
+        lines.append(f"Endpoint : {log.url}")
+        lines.append(f"Status HTTP : {log.status_code}")
+        lines.append(f"Duree : {log.duration_ms} ms")
+        lines.append(f"Objets retournes : {not_available(log.object_count)}")
+        if getattr(log, "request_id", None):
+            lines.append(f"request-id: {log.request_id}")
+        if getattr(log, "client_request_id", None):
+            lines.append(f"client-request-id: {log.client_request_id}")
+        if getattr(log, "response_date", None):
+            lines.append(f"date: {log.response_date}")
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
+def _build_chain_row(steps: list[tuple[str, str, str]]) -> QWidget:
+    row = QWidget()
+    layout = QHBoxLayout(row)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(6)
+    for index, (label, status_text, state) in enumerate(steps):
+        if index > 0:
+            arrow = QLabel("→")
+            arrow.setObjectName("muted")
+            layout.addWidget(arrow)
+        layout.addWidget(StatusBadge(f"{label} · {status_text}", state))
+    layout.addStretch()
+    return row
 
 
 class PlaceholderPage(QWidget):
@@ -200,25 +286,25 @@ class HomePage(QWidget):
         hero = QWidget()
         hero_layout = QVBoxLayout(hero)
         hero_layout.setAlignment(Qt.AlignHCenter)
-        title = QLabel("What do you want to do?")
+        title = QLabel("Que voulez-vous faire ?")
         title.setObjectName("pageTitle")
-        subtitle = QLabel("Search tools, devices and Endpoint data.")
+        subtitle = QLabel("Recherchez des outils, des appareils et des donnees Endpoint.")
         subtitle.setObjectName("muted")
-        self.search = SearchBox("Search tools or devices...")
+        self.search = SearchBox("Rechercher un outil ou un appareil...")
         self.search.setMaximumWidth(640)
         hero_layout.addWidget(title, 0, Qt.AlignHCenter)
         hero_layout.addWidget(subtitle, 0, Qt.AlignHCenter)
         hero_layout.addWidget(self.search)
         root.addWidget(hero)
 
-        root.addWidget(SectionHeader("QUICK TOOLS"))
+        root.addWidget(SectionHeader("OUTILS RAPIDES"))
         grid = QGridLayout()
         grid.setSpacing(14)
         tools = [
-            ("Split into Waves", "Create equal deployment waves.", "Deployment Tools", "simple", True),
-            ("Representative Pilot", "Build a pilot matching your fleet.", "Deployment Tools", "pilot", True),
-            ("Device Inspector", "Find issues on an Intune device.", "Intune", None, True),
-            ("Autopilot Inspector", "Coming soon", "Autopilot", None, False),
+            ("Repartir en vagues", "Creer des vagues de deploiement egales.", "Outils de deploiement", "simple", True),
+            ("Pilote representatif", "Constituer un pilote representatif du parc.", "Outils de deploiement", "pilot", True),
+            ("Device Inspector", "Detecter les problemes sur un appareil Intune.", "Intune", None, True),
+            ("Autopilot Inspector", "Diagnostiquer un appareil Autopilot.", "Autopilot", None, True),
         ]
         for index, (title_text, subtitle_text, page, mode, enabled) in enumerate(tools):
             button = QPushButton(f"{title_text}\n{subtitle_text}")
@@ -253,7 +339,7 @@ class DeploymentToolsPage(QWidget, AsyncPageMixin):
         self.progress.hide()
         root.addWidget(self.progress)
 
-        self.source_card = Card("1 Source", "Start with a CSV, XLSX or XLSM file.")
+        self.source_card = Card("1 Source", "Commencez avec un fichier CSV, XLSX ou XLSM.")
         self.source_layout = QVBoxLayout()
         self.source_layout.setContentsMargins(0, 0, 0, 0)
         self.source_card.layout.addLayout(self.source_layout)
@@ -263,7 +349,7 @@ class DeploymentToolsPage(QWidget, AsyncPageMixin):
         body = QHBoxLayout()
         body.setSpacing(18)
         self.config_card = Card("2 Configuration")
-        self.preview_card = Card("3 Preview", "Generate a preview before exporting.")
+        self.preview_card = Card("3 Apercu", "Generez un apercu avant d'exporter.")
         body.addWidget(self.config_card, 1)
         body.addWidget(self.preview_card, 1)
         root.addLayout(body)
@@ -285,7 +371,7 @@ class DeploymentToolsPage(QWidget, AsyncPageMixin):
         clear_layout(self.source_layout)
         drop = DropZone()
         drop.fileDropped.connect(self.load_file)
-        choose = PrimaryButton("Choose file")
+        choose = PrimaryButton("Choisir un fichier")
         choose.clicked.connect(self.select_file)
         self.source_layout.addWidget(drop)
         self.source_layout.addWidget(choose, 0, Qt.AlignLeft)
@@ -297,11 +383,11 @@ class DeploymentToolsPage(QWidget, AsyncPageMixin):
         row.setObjectName("compactRow")
         layout = QHBoxLayout(row)
         layout.setContentsMargins(14, 12, 14, 12)
-        info = QLabel(f"{self.source_path.name if self.source_path else 'Source file'}\n{len(self.dataframe):,} devices · {len(self.dataframe.columns)} columns")
+        info = QLabel(f"{self.source_path.name if self.source_path else 'Fichier source'}\n{len(self.dataframe):,} appareils · {len(self.dataframe.columns)} colonnes")
         info.setObjectName("cardTitle")
-        change = SecondaryButton("Change file")
+        change = SecondaryButton("Changer de fichier")
         change.clicked.connect(self.select_file)
-        columns = SecondaryButton("View columns")
+        columns = SecondaryButton("Voir les colonnes")
         columns.clicked.connect(self.show_columns)
         layout.addWidget(info, 1)
         layout.addWidget(columns)
@@ -309,14 +395,14 @@ class DeploymentToolsPage(QWidget, AsyncPageMixin):
         self.source_layout.addWidget(row)
 
     def _build_configuration(self) -> None:
-        self.config_card.layout.addWidget(SectionHeader("Distribution mode"))
+        self.config_card.layout.addWidget(SectionHeader("Mode de repartition"))
         mode_row = QGridLayout()
         self.mode_group = QButtonGroup(self)
         self.mode_buttons = [
-            ModeButton("Equal Split", "Same size waves"),
-            ModeButton("Progressive Rings", "Percent based rollout"),
-            ModeButton("Custom Sizes", "Exact device counts"),
-            ModeButton("Representative Pilot", "Stratified pilot"),
+            ModeButton("Repartition egale", "Vagues de meme taille"),
+            ModeButton("Rings progressifs", "Deploiement base sur un pourcentage"),
+            ModeButton("Tailles personnalisees", "Effectifs exacts par groupe"),
+            ModeButton("Pilote representatif", "Pilote stratifie"),
         ]
         for index, button in enumerate(self.mode_buttons):
             self.mode_group.addButton(button, index)
@@ -332,11 +418,11 @@ class DeploymentToolsPage(QWidget, AsyncPageMixin):
         self.config_card.layout.addWidget(self.mode_stack)
         self.activate_mode("simple")
 
-        self.advanced = CollapsibleSection("Advanced options", "Seed: 42 · No exclusions")
+        self.advanced = CollapsibleSection("Options avancees", "Seed : 42 · Aucune exclusion")
         self._build_advanced()
         self.config_card.layout.addWidget(self.advanced)
 
-        generate = PrimaryButton("Generate preview")
+        generate = PrimaryButton("Generer l'apercu")
         generate.clicked.connect(self.generate_preview)
         self.config_card.layout.addWidget(generate, 0, Qt.AlignLeft)
 
@@ -347,7 +433,7 @@ class DeploymentToolsPage(QWidget, AsyncPageMixin):
         panel = QWidget()
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(0, 12, 0, 0)
-        layout.addWidget(SectionHeader("Number of waves"))
+        layout.addWidget(SectionHeader("Nombre de vagues"))
         row = QHBoxLayout()
         minus = SecondaryButton("-")
         plus = SecondaryButton("+")
@@ -361,15 +447,15 @@ class DeploymentToolsPage(QWidget, AsyncPageMixin):
         row.addWidget(plus)
         row.addStretch()
         layout.addLayout(row)
-        self.randomize_checkbox = QCheckBox("Randomize devices")
+        self.randomize_checkbox = QCheckBox("Repartir les appareils aleatoirement")
         self.randomize_checkbox.setChecked(True)
         layout.addWidget(self.randomize_checkbox)
         self.criteria_container = QWidget()
         self.criteria_layout = QVBoxLayout(self.criteria_container)
         self.criteria_layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(SectionHeader("Balance waves by"))
+        layout.addWidget(SectionHeader("Equilibrer les vagues par"))
         layout.addWidget(self.criteria_container)
-        self.more_fields_button = SecondaryButton("More fields")
+        self.more_fields_button = SecondaryButton("Plus de champs")
         self.more_fields_button.clicked.connect(self.toggle_all_criteria)
         layout.addWidget(self.more_fields_button, 0, Qt.AlignLeft)
         return panel
@@ -382,9 +468,9 @@ class DeploymentToolsPage(QWidget, AsyncPageMixin):
         layout.addLayout(self.progressive_list)
         self.progressive_total = QLabel("Total 0%")
         self.progressive_total.setObjectName("cardTitle")
-        for name, pct in [("Pilot", 2), ("Ring 1", 8), ("Ring 2", 20), ("Ring 3", 30), ("Broad", 40)]:
+        for name, pct in [("Pilote", 2), ("Ring 1", 8), ("Ring 2", 20), ("Ring 3", 30), ("Large", 40)]:
             self.add_progressive_row(name, pct)
-        add = SecondaryButton("+ Add ring")
+        add = SecondaryButton("+ Ajouter un ring")
         add.clicked.connect(lambda: self.add_progressive_row("Ring", 0))
         layout.addWidget(add, 0, Qt.AlignLeft)
         layout.addWidget(self.progressive_total)
@@ -396,10 +482,10 @@ class DeploymentToolsPage(QWidget, AsyncPageMixin):
         layout.setContentsMargins(0, 12, 0, 0)
         self.custom_list = QVBoxLayout()
         layout.addLayout(self.custom_list)
-        for name, size, remaining in [("Pilot", 50, False), ("Ring 1", 100, False), ("Ring 2", 250, False), ("Broad", 0, True)]:
+        for name, size, remaining in [("Pilote", 50, False), ("Ring 1", 100, False), ("Ring 2", 250, False), ("Large", 0, True)]:
             self.add_custom_row(name, size, remaining)
-        add = SecondaryButton("+ Add group")
-        add.clicked.connect(lambda: self.add_custom_row("Group", 0, False))
+        add = SecondaryButton("+ Ajouter un groupe")
+        add.clicked.connect(lambda: self.add_custom_row("Groupe", 0, False))
         layout.addWidget(add, 0, Qt.AlignLeft)
         return panel
 
@@ -407,14 +493,14 @@ class DeploymentToolsPage(QWidget, AsyncPageMixin):
         panel = QWidget()
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(0, 12, 0, 0)
-        layout.addWidget(SectionHeader("Representative Pilot", "Build a pilot group reflecting the overall fleet."))
+        layout.addWidget(SectionHeader("Pilote representatif", "Constituez un groupe pilote representatif de l'ensemble du parc."))
         row = QHBoxLayout()
-        row.addWidget(QLabel("Pilot size"))
+        row.addWidget(QLabel("Taille du pilote"))
         self.pilot_size = QSpinBox()
         self.pilot_size.setRange(1, 1_000_000)
         self.pilot_size.setValue(100)
         row.addWidget(self.pilot_size)
-        row.addWidget(QLabel("devices"))
+        row.addWidget(QLabel("appareils"))
         row.addStretch()
         layout.addLayout(row)
         return panel
@@ -425,15 +511,15 @@ class DeploymentToolsPage(QWidget, AsyncPageMixin):
         self.seed_input.setRange(0, 999999999)
         self.seed_input.setValue(DEFAULT_RANDOM_SEED)
         self.identifier_column = QComboBox()
-        form.addRow("Deterministic seed", self.seed_input)
-        form.addRow("Identity field", self.identifier_column)
+        form.addRow("Seed deterministe", self.seed_input)
+        form.addRow("Champ d'identite", self.identifier_column)
         self.advanced.content_layout.addLayout(form)
-        self.exclusion_summary = QLabel("No exclusions")
+        self.exclusion_summary = QLabel("Aucune exclusion")
         self.exclusion_summary.setObjectName("muted")
         self.exclusion_text = QPlainTextEdit()
-        self.exclusion_text.setPlaceholderText("Paste exclusions, one per line")
+        self.exclusion_text.setPlaceholderText("Collez les exclusions, une par ligne")
         self.exclusion_text.setMaximumHeight(88)
-        load = SecondaryButton("Load file")
+        load = SecondaryButton("Charger un fichier")
         load.clicked.connect(self.load_exclusion_file)
         self.advanced.content_layout.addWidget(SectionHeader("Exclusions"))
         self.advanced.content_layout.addWidget(self.exclusion_summary)
@@ -441,7 +527,7 @@ class DeploymentToolsPage(QWidget, AsyncPageMixin):
         self.advanced.content_layout.addWidget(load, 0, Qt.AlignLeft)
 
     def _build_preview(self) -> None:
-        self.preview_summary = QLabel("No preview yet")
+        self.preview_summary = QLabel("Pas encore d'apercu")
         self.preview_summary.setObjectName("muted")
         self.preview_card.layout.addWidget(self.preview_summary)
         self.ring_cards_layout = QGridLayout()
@@ -450,7 +536,7 @@ class DeploymentToolsPage(QWidget, AsyncPageMixin):
         self.distribution_layout = QVBoxLayout(self.distribution_container)
         self.distribution_layout.setContentsMargins(0, 0, 0, 0)
         self.preview_card.layout.addWidget(self.distribution_container)
-        devices = SecondaryButton("View devices")
+        devices = SecondaryButton("Voir les appareils")
         devices.clicked.connect(self.show_devices)
         self.preview_card.layout.addWidget(devices, 0, Qt.AlignLeft)
 
@@ -464,25 +550,25 @@ class DeploymentToolsPage(QWidget, AsyncPageMixin):
         format_row.addWidget(self.export_csv)
         format_row.addStretch()
         files_row = QHBoxLayout()
-        self.export_global = QCheckBox("Global file")
+        self.export_global = QCheckBox("Fichier global")
         self.export_global.setChecked(True)
-        self.export_split = QCheckBox("One file per ring")
+        self.export_split = QCheckBox("Un fichier par ring")
         self.export_split.setChecked(True)
         files_row.addWidget(self.export_global)
         files_row.addWidget(self.export_split)
         self.export_dir = QLineEdit()
-        browse = SecondaryButton("Browse")
+        browse = SecondaryButton("Parcourir")
         browse.clicked.connect(self.select_export_dir)
         folder_row = QHBoxLayout()
         folder_row.addWidget(self.export_dir, 1)
         folder_row.addWidget(browse)
-        self.export_prefix = QLineEdit("deployment")
+        self.export_prefix = QLineEdit("deploiement")
         form.addRow("Format", format_row)
-        form.addRow("Files", files_row)
-        form.addRow("Output folder", folder_row)
-        form.addRow("File prefix", self.export_prefix)
+        form.addRow("Fichiers", files_row)
+        form.addRow("Dossier de sortie", folder_row)
+        form.addRow("Prefixe de fichier", self.export_prefix)
         self.export_card.layout.addLayout(form)
-        export = PrimaryButton("Export")
+        export = PrimaryButton("Exporter")
         export.clicked.connect(self.export_result)
         self.export_card.layout.addWidget(export, 0, Qt.AlignLeft)
 
@@ -528,7 +614,7 @@ class DeploymentToolsPage(QWidget, AsyncPageMixin):
         size_input = QSpinBox()
         size_input.setRange(0, 10_000_000)
         size_input.setValue(size)
-        remaining_check = QCheckBox("Remaining")
+        remaining_check = QCheckBox("Restant")
         remaining_check.setChecked(remaining)
         remove = SecondaryButton("x")
         remove.clicked.connect(lambda: self.remove_custom_row(row))
@@ -545,7 +631,7 @@ class DeploymentToolsPage(QWidget, AsyncPageMixin):
         row.deleteLater()
 
     def select_file(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Select a file", "", "Data files (*.csv *.xlsx *.xlsm)")
+        path, _ = QFileDialog.getOpenFileName(self, "Selectionner un fichier", "", "Fichiers de donnees (*.csv *.xlsx *.xlsm)")
         if path:
             self.load_file(path)
 
@@ -557,10 +643,10 @@ class DeploymentToolsPage(QWidget, AsyncPageMixin):
     def _file_loaded(self, result: object) -> None:
         self.dataframe = result  # type: ignore[assignment]
         self.result = None
-        self.export_prefix.setText(self.source_path.stem if self.source_path else "deployment")
+        self.export_prefix.setText(self.source_path.stem if self.source_path else "deploiement")
         self._populate_columns()
         self._render_source_loaded()
-        self.preview_summary.setText("Source loaded. Generate a preview when ready.")
+        self.preview_summary.setText("Source chargee. Generez un apercu quand vous etes pret.")
 
     def _populate_columns(self) -> None:
         self.identifier_column.clear()
@@ -596,11 +682,11 @@ class DeploymentToolsPage(QWidget, AsyncPageMixin):
 
     def toggle_all_criteria(self) -> None:
         self.all_criteria_visible = not self.all_criteria_visible
-        self.more_fields_button.setText("Fewer fields" if self.all_criteria_visible else "More fields")
+        self.more_fields_button.setText("Moins de champs" if self.all_criteria_visible else "Plus de champs")
         self._render_criteria()
 
     def load_exclusion_file(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Load exclusions", "", "Text/CSV (*.txt *.csv);;All (*.*)")
+        path, _ = QFileDialog.getOpenFileName(self, "Charger des exclusions", "", "Texte/CSV (*.txt *.csv);;Tous (*.*)")
         if not path:
             return
         try:
@@ -612,7 +698,7 @@ class DeploymentToolsPage(QWidget, AsyncPageMixin):
 
     def generate_preview(self) -> None:
         if self.dataframe is None:
-            QMessageBox.information(self, "Deployment Tools", "Choose a source file first.")
+            QMessageBox.information(self, "Outils de deploiement", "Choisissez d'abord un fichier source.")
             return
         self._start_task(self._build_result, self._preview_ready, self._task_failed)
 
@@ -675,7 +761,7 @@ class DeploymentToolsPage(QWidget, AsyncPageMixin):
         clear_layout(self.distribution_layout)
         if self.result is None:
             return
-        self.preview_summary.setText(f"{len(self.result.dataframe):,} devices assigned")
+        self.preview_summary.setText(f"{len(self.result.dataframe):,} appareils assignes")
         for index, summary in enumerate(self.result.summaries):
             card = StatCard(summary.name, f"{summary.rows:,}", f"{summary.percentage:.1f}%")
             self.ring_cards_layout.addWidget(card, index // 2, index % 2)
@@ -688,7 +774,7 @@ class DeploymentToolsPage(QWidget, AsyncPageMixin):
     def _add_distribution(self, column: str) -> None:
         if self.result is None or column not in self.result.dataframe.columns:
             return
-        values = self.result.dataframe[column].fillna("Not available").astype(str).value_counts(normalize=True).head(5)
+        values = self.result.dataframe[column].fillna("Non disponible").astype(str).value_counts(normalize=True).head(5)
         section = Card(column)
         for value, ratio in values.items():
             row = QHBoxLayout()
@@ -708,21 +794,21 @@ class DeploymentToolsPage(QWidget, AsyncPageMixin):
 
     def _update_advanced_summary(self) -> None:
         exclusions = self._exclusion_values()
-        exclusion_text = f"{len(exclusions)} exclusions" if exclusions else "No exclusions"
+        exclusion_text = f"{len(exclusions)} exclusions" if exclusions else "Aucune exclusion"
         self.exclusion_summary.setText(exclusion_text)
-        self.advanced.set_summary(f"Seed: {self.seed_input.value()} · {exclusion_text}")
+        self.advanced.set_summary(f"Seed : {self.seed_input.value()} · {exclusion_text}")
 
     def show_columns(self) -> None:
         if self.dataframe is None:
             return
-        QMessageBox.information(self, "Columns", "\n".join(str(column) for column in self.dataframe.columns))
+        QMessageBox.information(self, "Colonnes", "\n".join(str(column) for column in self.dataframe.columns))
 
     def show_devices(self) -> None:
         if self.result is None:
-            QMessageBox.information(self, "Devices", "Generate a preview first.")
+            QMessageBox.information(self, "Appareils", "Generez d'abord un apercu.")
             return
         dialog = QDialog(self)
-        dialog.setWindowTitle("Assigned devices")
+        dialog.setWindowTitle("Appareils assignes")
         dialog.resize(980, 620)
         layout = QVBoxLayout(dialog)
         preview = preview_rows(self.result.dataframe, DEFAULT_PREVIEW_ROWS)
@@ -736,13 +822,13 @@ class DeploymentToolsPage(QWidget, AsyncPageMixin):
         dialog.exec()
 
     def select_export_dir(self) -> None:
-        directory = QFileDialog.getExistingDirectory(self, "Choose export folder")
+        directory = QFileDialog.getExistingDirectory(self, "Choisir le dossier d'export")
         if directory:
             self.export_dir.setText(directory)
 
     def export_result(self) -> None:
         if self.result is None:
-            QMessageBox.information(self, "Export", "Generate a preview before export.")
+            QMessageBox.information(self, "Export", "Generez un apercu avant d'exporter.")
             return
         if not self.export_dir.text().strip():
             self.select_export_dir()
@@ -750,16 +836,16 @@ class DeploymentToolsPage(QWidget, AsyncPageMixin):
             return
         options = ExportOptions(
             output_dir=Path(self.export_dir.text()),
-            prefix=self.export_prefix.text().strip() or "deployment",
+            prefix=self.export_prefix.text().strip() or "deploiement",
             file_format="xlsx" if self.export_xlsx.isChecked() else "csv",
             split_by_ring=self.export_split.isChecked(),
             include_global=self.export_global.isChecked(),
         )
         exported = export_rings(self.result, options)
-        QMessageBox.information(self, "Export complete", f"{len(exported.paths)} file(s) created.")
+        QMessageBox.information(self, "Export termine", f"{len(exported.paths)} fichier(s) cree(s).")
 
     def _task_failed(self, message: str) -> None:
-        QMessageBox.critical(self, "Deployment Tools", message)
+        QMessageBox.critical(self, "Outils de deploiement", message)
 
 
 class IntunePage(QWidget, AsyncPageMixin):
@@ -775,11 +861,11 @@ class IntunePage(QWidget, AsyncPageMixin):
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 24, 24, 24)
         root.setSpacing(16)
-        root.addWidget(SectionHeader("Device Inspector", "Search a device and see what needs attention first."))
+        root.addWidget(SectionHeader("Device Inspector", "Recherchez un appareil et consultez en priorite ce qui necessite votre attention."))
         search_row = QHBoxLayout()
-        self.search_input = SearchBox("Search device name, serial number or ID...")
+        self.search_input = SearchBox("Rechercher par nom, numero de serie ou ID...")
         self.search_input.returnPressed.connect(self.search_devices)
-        search = PrimaryButton("Search")
+        search = PrimaryButton("Rechercher")
         search.clicked.connect(self.search_devices)
         search_row.addWidget(self.search_input, 1)
         search_row.addWidget(search)
@@ -789,7 +875,7 @@ class IntunePage(QWidget, AsyncPageMixin):
         self.progress.hide()
         root.addWidget(self.progress)
 
-        self.results_card = Card("Results")
+        self.results_card = Card("Resultats")
         self.results_layout = QVBoxLayout()
         self.results_layout.setContentsMargins(0, 0, 0, 0)
         self.results_card.layout.addLayout(self.results_layout)
@@ -797,28 +883,28 @@ class IntunePage(QWidget, AsyncPageMixin):
 
         self.device_card = Card()
         header_row = QHBoxLayout()
-        self.device_header = QLabel("No device selected")
+        self.device_header = QLabel("Aucun appareil selectionne")
         self.device_header.setObjectName("pageTitle")
-        self.refresh_button = SecondaryButton("Refresh")
-        self.refresh_button.setToolTip("Refresh data from Microsoft Graph")
+        self.refresh_button = SecondaryButton("Actualiser")
+        self.refresh_button.setToolTip("Actualiser les donnees depuis Microsoft Graph")
         self.refresh_button.clicked.connect(self.refresh_current_device)
         self.refresh_button.setEnabled(False)
         header_row.addWidget(self.device_header, 1)
         header_row.addWidget(self.refresh_button)
         self.device_badges = QLabel("")
         self.device_badges.setObjectName("muted")
-        self.health_summary = QLabel("Search and select a device to inspect health.")
+        self.health_summary = QLabel("Recherchez et selectionnez un appareil pour en inspecter l'etat de sante.")
         self.health_summary.setObjectName("cardTitle")
         self.device_card.layout.addLayout(header_row)
         self.device_card.layout.addWidget(self.health_summary)
         self.device_card.layout.addWidget(self.device_badges)
         root.addWidget(self.device_card)
 
-        self.issues_card = Card("Issues detected")
+        self.issues_card = Card("Problemes detectes")
         self.issues_layout = QVBoxLayout()
         self.issues_layout.setContentsMargins(0, 0, 0, 0)
         self.issues_card.layout.addLayout(self.issues_layout)
-        self.issues_layout.addWidget(EmptyState("No device selected", "Issues appear here after inspection."))
+        self.issues_layout.addWidget(EmptyState("Aucun appareil selectionne", "Les problemes apparaissent ici apres inspection."))
         root.addWidget(self.issues_card)
 
         self.detail_tabs = QTabWidget()
@@ -831,13 +917,13 @@ class IntunePage(QWidget, AsyncPageMixin):
         raw_page = QWidget()
         raw_layout = QVBoxLayout(raw_page)
         raw_actions = QHBoxLayout()
-        copy = SecondaryButton("Copy")
+        copy = SecondaryButton("Copier")
         copy.clicked.connect(self.copy_raw_data)
-        copy_endpoint = SecondaryButton("Copy endpoint")
+        copy_endpoint = SecondaryButton("Copier l'endpoint")
         copy_endpoint.clicked.connect(self.copy_current_endpoint)
-        export = SecondaryButton("Export JSON")
+        export = SecondaryButton("Exporter le JSON")
         export.clicked.connect(self.export_raw_data)
-        export_diagnostics = SecondaryButton("Export Diagnostics")
+        export_diagnostics = SecondaryButton("Exporter les diagnostics")
         export_diagnostics.clicked.connect(self.export_diagnostics_bundle)
         raw_actions.addWidget(copy)
         raw_actions.addWidget(copy_endpoint)
@@ -850,10 +936,10 @@ class IntunePage(QWidget, AsyncPageMixin):
         raw_layout.addWidget(self.raw_tabs)
         self.diagnostics = QPlainTextEdit()
         self.diagnostics.setReadOnly(True)
-        self.detail_tabs.addTab(self.overview_page, "Overview")
-        self.detail_tabs.addTab(self.compliance_page, "Compliance")
+        self.detail_tabs.addTab(self.overview_page, "Vue d'ensemble")
+        self.detail_tabs.addTab(self.compliance_page, "Conformite")
         self.detail_tabs.addTab(self.applications_page, "Applications")
-        self.detail_tabs.addTab(raw_page, "Raw Data")
+        self.detail_tabs.addTab(raw_page, "Donnees brutes")
         self.detail_tabs.addTab(self.diagnostics, "Diagnostics")
         root.addWidget(self.detail_tabs, 1)
 
@@ -873,13 +959,13 @@ class IntunePage(QWidget, AsyncPageMixin):
         self.search_results = list(devices)
         clear_layout(self.results_layout)
         if not self.search_results:
-            self.results_layout.addWidget(EmptyState("No results", "Try another device name."))
+            self.results_layout.addWidget(EmptyState("Aucun resultat", "Essayez un autre nom d'appareil."))
         for index, device in enumerate(self.search_results):
             button = QPushButton(
                 f"{device.device_name}\n"
                 f"{not_available(device.serial_number)} · {not_available(device.user_principal_name)} · "
                 f"{not_available(device.model)} · {not_available(device.operating_system)} · "
-                f"Enrolled: {not_available(device.enrolled_datetime)} · Last check-in: {relative_datetime(device.last_sync_datetime)}"
+                f"Inscrit : {not_available(device.enrolled_datetime)} · Dernier check-in : {relative_datetime(device.last_sync_datetime)}"
             )
             button.setObjectName("modeButton")
             button.clicked.connect(lambda _=False, row=index: self.inspect_device(row))
@@ -903,14 +989,14 @@ class IntunePage(QWidget, AsyncPageMixin):
         device = self.current_result.device
         health = self.current_result.health
         self.device_header.setText(device.device_name)
-        os_label = " ".join(part for part in [device.operating_system, device.os_version] if part) or "OS Not available"
-        managed = "Managed" if device.is_managed else "Not Managed"
+        os_label = " ".join(part for part in [device.operating_system, device.os_version] if part) or "OS non disponible"
+        managed = "Gere" if device.is_managed else "Non gere"
         failed_apps = len(health.failed_applications) if health else 0
-        health_status = health.status if health else ("Attention" if device.issues else "Healthy")
-        self.health_summary.setText(f"Health: {health_status} · {len(device.issues)} issues · {failed_apps} app failure(s)")
+        health_status = health.status if health else ("ATTENTION" if device.issues else "HEALTHY")
+        self.health_summary.setText(f"Sante : {health_status} · {len(device.issues)} probleme(s) · {failed_apps} echec(s) applicatif(s)")
         self.device_badges.setText(
             f"{managed} · {not_available(device.compliance_state)} · {os_label} · "
-            f"Last check-in: {relative_datetime(device.last_sync_datetime)} ({not_available(device.last_sync_datetime)})"
+            f"Dernier check-in : {relative_datetime(device.last_sync_datetime)} ({not_available(device.last_sync_datetime)})"
         )
         self.refresh_button.setEnabled(True)
         self._fill_issues(device)
@@ -922,11 +1008,11 @@ class IntunePage(QWidget, AsyncPageMixin):
 
     def _fill_issues(self, device: ManagedDevice) -> None:
         clear_layout(self.issues_layout)
-        header = QLabel(f"Issues detected  {len(device.issues)}")
+        header = QLabel(f"Problemes detectes  {len(device.issues)}")
         header.setObjectName("sectionTitle")
         self.issues_layout.addWidget(header)
         if not device.issues:
-            self.issues_layout.addWidget(EmptyState("No issues detected", "No deterministic issue was found from the retrieved Intune data."))
+            self.issues_layout.addWidget(EmptyState("Aucun probleme detecte", "Aucun probleme deterministe n'a ete detecte a partir des donnees Intune recuperees."))
             return
         for issue in device.issues:
             card = QFrame()
@@ -937,9 +1023,9 @@ class IntunePage(QWidget, AsyncPageMixin):
             title.setObjectName("cardTitle")
             reason = QLabel(issue.reason)
             reason.setObjectName("muted")
-            source = QLabel(f"Source: {issue.source}")
+            source = QLabel(f"Source : {issue.source}")
             source.setObjectName("muted")
-            evidence = QLabel(f"Evidence: {issue.evidence}") if issue.evidence else None
+            evidence = QLabel(f"Preuve : {issue.evidence}") if issue.evidence else None
             if evidence:
                 evidence.setObjectName("muted")
             layout.addWidget(title)
@@ -955,36 +1041,36 @@ class IntunePage(QWidget, AsyncPageMixin):
         primary_user = device.primary_users[0].get("userPrincipalName") if device.primary_users else device.user_principal_name
         entra = health.entra_device if health else None
         groups = [
-            ("IDENTITY", [
-                ("Device name", device.device_name),
-                ("Serial number", device.serial_number),
-                ("User", primary_user),
-                ("Ownership", device.owner_type),
+            ("IDENTITE", [
+                ("Nom de l'appareil", device.device_name),
+                ("Numero de serie", device.serial_number),
+                ("Utilisateur", primary_user),
+                ("Propriete", device.owner_type),
             ]),
-            ("HARDWARE", [
-                ("Manufacturer", device.manufacturer),
-                ("Model", device.model),
+            ("MATERIEL", [
+                ("Fabricant", device.manufacturer),
+                ("Modele", device.model),
                 ("Architecture", None),
             ]),
             ("WINDOWS", [
                 ("OS", device.operating_system),
                 ("Version", device.os_version),
-                ("Enrollment", device.enrollment_type),
+                ("Inscription", device.enrollment_type),
             ]),
             ("INTUNE", [
                 ("Managed Device ID", device.id),
-                ("Enrollment", device.enrollment_type),
-                ("Compliance", device.compliance_state),
-                ("Last check-in", device.last_sync_datetime),
-                ("Management agent", device.management_agent),
+                ("Inscription", device.enrollment_type),
+                ("Conformite", device.compliance_state),
+                ("Dernier check-in", device.last_sync_datetime),
+                ("Agent de gestion", device.management_agent),
             ]),
             ("ENTRA ID", [
                 ("Device ID", entra.device_id if entra else device.entra_device_id),
-                ("Enabled", entra.account_enabled if entra else None),
+                ("Compte actif", entra.account_enabled if entra else None),
                 ("Trust / Join", entra.trust_type if entra else None),
             ]),
-            ("SECURITY", [
-                ("Encryption state", device.is_encrypted),
+            ("SECURITE", [
+                ("Etat de chiffrement", device.is_encrypted),
                 ("Jailbroken/rooted", device.jail_broken),
             ]),
         ]
@@ -1001,12 +1087,12 @@ class IntunePage(QWidget, AsyncPageMixin):
         grid = KeyValueGrid()
         grid.set_rows(
             [
-                ("Compliance state", not_available(compliance.state if compliance else device.compliance_state)),
-                ("Grace period expiration", not_available(compliance.grace_period_expiration_datetime if compliance else None)),
-                ("Detailed reason", not_available(compliance.detail if compliance else "Not available through the current Graph endpoint.")),
+                ("Etat de conformite", not_available(compliance.state if compliance else device.compliance_state)),
+                ("Expiration de la periode de grace", not_available(compliance.grace_period_expiration_datetime if compliance else None)),
+                ("Raison detaillee", not_available(compliance.detail if compliance else "Non disponible via l'endpoint Graph actuel.")),
             ]
         )
-        card = Card("Compliance")
+        card = Card("Conformite")
         card.layout.addWidget(grid)
         self.compliance_layout.addWidget(card)
         self.compliance_layout.addStretch()
@@ -1014,29 +1100,29 @@ class IntunePage(QWidget, AsyncPageMixin):
     def _fill_applications(self, health: DeviceHealth | None) -> None:
         clear_layout(self.applications_layout)
         if not health:
-            self.applications_layout.addWidget(EmptyState("Applications not loaded", "Select a device to load application status."))
+            self.applications_layout.addWidget(EmptyState("Applications non chargees", "Selectionnez un appareil pour charger l'etat des applications."))
             return
         app_source = next((source for source in health.sources if source.name == "Applications"), None)
         failure_source = next((source for source in health.sources if source.name == "Application failures"), None)
         if app_source and app_source.permission_missing:
             self.applications_layout.addWidget(
-                EmptyState("Application status unavailable", "Required permission: DeviceManagementManagedDevices.Read.All")
+                EmptyState("Etat des applications indisponible", "Permission requise : DeviceManagementManagedDevices.Read.All")
             )
             return
         apps = list(health.applications)
         if not apps:
-            message = "No application records were returned for this device."
+            message = "Aucune application n'a ete renvoyee pour cet appareil."
             if failure_source and failure_source.permission_missing:
-                message = "Application troubleshooting details require additional permission or beta endpoint access."
-            self.applications_layout.addWidget(EmptyState("No application status", message))
+                message = "Les details de troubleshooting applicatif necessitent une permission supplementaire ou l'acces a l'endpoint beta."
+            self.applications_layout.addWidget(EmptyState("Aucun etat applicatif", message))
             return
         detected = [app for app in apps if app.kind == "detected_app"]
         deployment = [app for app in apps if app.kind == "deployment_status"]
         if deployment:
-            self.applications_layout.addWidget(SectionHeader("Deployment Status", "Troubleshooting events returned by Graph."))
+            self.applications_layout.addWidget(SectionHeader("Deployment Status", "Evenements de troubleshooting renvoyes par Graph."))
             self._add_application_state_groups(deployment)
         if detected:
-            self.applications_layout.addWidget(SectionHeader("Detected Apps", "Inventory presence only; not proof of deployment success."))
+            self.applications_layout.addWidget(SectionHeader("Detected Apps", "Presence en inventaire uniquement ; ne prouve pas le succes du deploiement."))
             self._add_application_state_groups(detected)
         self.applications_layout.addStretch()
 
@@ -1057,8 +1143,8 @@ class IntunePage(QWidget, AsyncPageMixin):
             name = QLabel(app.name)
             name.setObjectName("cardTitle")
             detail = QLabel(
-                f"Version: {not_available(app.version)} · Error: {not_available(app.error_code)}"
-                + (f" · Decimal: {app.error_decimal}" if app.error_decimal is not None else " · Unknown error")
+                f"Version : {not_available(app.version)} · Erreur : {not_available(app.error_code)}"
+                + (f" · Decimal : {app.error_decimal}" if app.error_decimal is not None else " · Erreur inconnue")
             )
             detail.setObjectName("muted")
             layout.addWidget(name)
@@ -1072,77 +1158,18 @@ class IntunePage(QWidget, AsyncPageMixin):
         raw_sources = health.raw_sources if health else {"Intune Managed Device": device.raw}
         if "Intune Managed Device" not in raw_sources:
             raw_sources = {"Intune Managed Device": device.raw, **raw_sources}
+        sources = health.sources if health else ()
         for title, payload in raw_sources.items():
             editor = QPlainTextEdit()
             editor.setReadOnly(True)
-            editor.setPlainText(json.dumps(self._raw_payload_with_metadata(title, payload, health), indent=2, sort_keys=True))
+            editor.setPlainText(json.dumps(_raw_payload_with_metadata(title, payload, sources), indent=2, sort_keys=True))
             self.raw_tabs.addTab(editor, title)
             self.raw_editors[title] = editor
 
-    def _raw_payload_with_metadata(self, title: str, payload: object, health: DeviceHealth | None) -> dict[str, object]:
-        source = None
-        if health:
-            source = next((item for item in health.sources if title.casefold().startswith(item.name.split()[0].casefold())), None)
-        return {
-            "metadata": {
-                "source": title,
-                "endpoint": source.endpoint if source else None,
-                "api_version": source.api_version if source else None,
-                "status": source.status_code if source else None,
-                "timestamp": source.response_date if source else None,
-                "request_id": source.request_id if source else None,
-            },
-            "json": payload,
-        }
-
     def _fill_diagnostics(self, logs) -> None:
-        lines = []
-        if self.current_result and self.current_result.health:
-            if self.current_result.health.capabilities:
-                lines.append("Capabilities")
-                for capability in self.current_result.health.capabilities:
-                    extra = f" · Required permission: {capability.required_permission}" if capability.required_permission else ""
-                    reason = f" · {capability.reason}" if capability.reason else ""
-                    lines.append(f"{capability.name}: {capability.state}{extra}{reason}")
-                lines.append("")
-            for source in self.current_result.health.sources:
-                state = "OK" if source.available else "Unavailable"
-                if source.permission_missing:
-                    state = "Permission missing"
-                lines.append(f"{source.name}: {state}")
-                lines.append(f"API: {source.api_version}")
-                lines.append(f"Endpoint: {source.endpoint}")
-                lines.append(f"HTTP status: {not_available(source.status_code)}")
-                lines.append(f"Duration: {source.duration_ms} ms")
-                lines.append(f"Objects returned: {not_available(source.object_count)}")
-                lines.append(f"Capability: {state.upper().replace(' ', '_')}")
-                if source.required_permission:
-                    lines.append(f"Required permission: {source.required_permission}")
-                if source.request_id:
-                    lines.append(f"request-id: {source.request_id}")
-                if source.client_request_id:
-                    lines.append(f"client-request-id: {source.client_request_id}")
-                if source.response_date:
-                    lines.append(f"date: {source.response_date}")
-                if source.error:
-                    lines.append(f"Error: {source.error}")
-                lines.append("")
-        for log in logs:
-            source = getattr(log, "source", "Graph")
-            lines.append(f"Source: {source}")
-            lines.append(f"API: {getattr(log, 'api_version', 'v1.0')}")
-            lines.append(f"Endpoint: {log.url}")
-            lines.append(f"HTTP status: {log.status_code}")
-            lines.append(f"Duration: {log.duration_ms} ms")
-            lines.append(f"Objects returned: {not_available(log.object_count)}")
-            if getattr(log, "request_id", None):
-                lines.append(f"request-id: {log.request_id}")
-            if getattr(log, "client_request_id", None):
-                lines.append(f"client-request-id: {log.client_request_id}")
-            if getattr(log, "response_date", None):
-                lines.append(f"date: {log.response_date}")
-            lines.append("")
-        self.diagnostics.setPlainText("\n".join(lines).strip())
+        health = self.current_result.health if self.current_result else None
+        text = _build_diagnostics_text(health.capabilities if health else (), health.sources if health else (), logs)
+        self.diagnostics.setPlainText(text)
 
     def copy_raw_data(self) -> None:
         editor = self.raw_tabs.currentWidget()
@@ -1152,7 +1179,7 @@ class IntunePage(QWidget, AsyncPageMixin):
     def export_raw_data(self) -> None:
         if not self.current_result:
             return
-        path, _ = QFileDialog.getSaveFileName(self, "Export Raw JSON", f"{self.current_result.device.device_name}.json", "JSON (*.json)")
+        path, _ = QFileDialog.getSaveFileName(self, "Exporter le JSON brut", f"{self.current_result.device.device_name}.json", "JSON (*.json)")
         if path:
             editor = self.raw_tabs.currentWidget()
             if isinstance(editor, QPlainTextEdit):
@@ -1162,22 +1189,503 @@ class IntunePage(QWidget, AsyncPageMixin):
         if not self.current_result or not self.current_result.health:
             return
         title = self.raw_tabs.tabText(self.raw_tabs.currentIndex())
-        source = next((item for item in self.current_result.health.sources if title.casefold().startswith(item.name.split()[0].casefold())), None)
+        source = _find_source_for_title(title, self.current_result.health.sources)
         if source:
             QApplication.clipboard().setText(source.endpoint)
 
     def export_diagnostics_bundle(self) -> None:
         if not self.current_result:
             return
-        directory = QFileDialog.getExistingDirectory(self, "Export Diagnostics")
+        directory = QFileDialog.getExistingDirectory(self, "Exporter les diagnostics")
         if not directory:
             return
         path = export_support_bundle(self.current_result, Path(directory))
-        QMessageBox.information(self, "Diagnostics exported", f"Support bundle created:\n{path}")
+        QMessageBox.information(self, "Diagnostics exportes", f"Support bundle cree :\n{path}")
 
     def _task_failed(self, message: str) -> None:
         QMessageBox.critical(self, "Intune Device Inspector", message)
         self.diagnostics.setPlainText(message)
+
+
+class AutopilotPage(QWidget, AsyncPageMixin):
+    def __init__(self):
+        super().__init__()
+        self.service: AutopilotInspectorService | None = None
+        self.search_results: list[AutopilotSearchResult] = []
+        self.current_result: AutopilotInspectorResult | None = None
+        self.current_selection: AutopilotSearchResult | None = None
+        self.thread: QThread | None = None
+        self.worker: TaskWorker | None = None
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 24, 24, 24)
+        root.setSpacing(16)
+        root.addWidget(
+            SectionHeader(
+                "Diagnostic Autopilot",
+                "Recherchez un appareil Autopilot pour comprendre sa chaine d'enrolement : Autopilot, profil, Entra ID et Intune.",
+            )
+        )
+        search_row = QHBoxLayout()
+        self.search_input = SearchBox("Numero de serie, Autopilot ID, Managed Device ID, Entra Device ID ou nom du poste...")
+        self.search_input.returnPressed.connect(self.search_devices)
+        search = PrimaryButton("Rechercher")
+        search.clicked.connect(self.search_devices)
+        search_row.addWidget(self.search_input, 1)
+        search_row.addWidget(search)
+        root.addLayout(search_row)
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 0)
+        self.progress.hide()
+        root.addWidget(self.progress)
+
+        self.results_card = Card("Resultats")
+        self.results_layout = QVBoxLayout()
+        self.results_layout.setContentsMargins(0, 0, 0, 0)
+        self.results_card.layout.addLayout(self.results_layout)
+        root.addWidget(self.results_card)
+
+        self.device_card = Card()
+        header_row = QHBoxLayout()
+        self.device_header = QLabel("Aucun appareil selectionne")
+        self.device_header.setObjectName("pageTitle")
+        self.refresh_button = SecondaryButton("Actualiser")
+        self.refresh_button.setToolTip("Actualiser les donnees depuis Microsoft Graph")
+        self.refresh_button.clicked.connect(self.refresh_current_device)
+        self.refresh_button.setEnabled(False)
+        header_row.addWidget(self.device_header, 1)
+        header_row.addWidget(self.refresh_button)
+        self.health_summary = QLabel("Recherchez et selectionnez un appareil Autopilot pour voir sa chaine d'enrolement.")
+        self.health_summary.setObjectName("cardTitle")
+        self.device_badges = QLabel("")
+        self.device_badges.setObjectName("muted")
+        self.chain_container = QWidget()
+        self.chain_layout = QVBoxLayout(self.chain_container)
+        self.chain_layout.setContentsMargins(0, 8, 0, 0)
+        self.device_card.layout.addLayout(header_row)
+        self.device_card.layout.addWidget(self.health_summary)
+        self.device_card.layout.addWidget(self.device_badges)
+        self.device_card.layout.addWidget(self.chain_container)
+        root.addWidget(self.device_card)
+
+        self.issues_card = Card("Problemes detectes")
+        self.issues_layout = QVBoxLayout()
+        self.issues_layout.setContentsMargins(0, 0, 0, 0)
+        self.issues_card.layout.addLayout(self.issues_layout)
+        self.issues_layout.addWidget(EmptyState("Aucun appareil selectionne", "Les problemes apparaissent ici apres inspection."))
+        root.addWidget(self.issues_card)
+
+        self.detail_tabs = QTabWidget()
+        self.overview_page = QWidget()
+        self.overview_layout = QGridLayout(self.overview_page)
+        self.autopilot_tab = QWidget()
+        self.autopilot_tab_layout = QVBoxLayout(self.autopilot_tab)
+        self.intune_tab = QWidget()
+        self.intune_tab_layout = QVBoxLayout(self.intune_tab)
+        self.entra_tab = QWidget()
+        self.entra_tab_layout = QVBoxLayout(self.entra_tab)
+        raw_page = QWidget()
+        raw_layout = QVBoxLayout(raw_page)
+        raw_actions = QHBoxLayout()
+        copy = SecondaryButton("Copier")
+        copy.clicked.connect(self.copy_raw_data)
+        copy_endpoint = SecondaryButton("Copier l'endpoint")
+        copy_endpoint.clicked.connect(self.copy_current_endpoint)
+        export = SecondaryButton("Exporter le JSON")
+        export.clicked.connect(self.export_raw_data)
+        export_diagnostics = SecondaryButton("Exporter les diagnostics")
+        export_diagnostics.clicked.connect(self.export_diagnostics_bundle)
+        raw_actions.addWidget(copy)
+        raw_actions.addWidget(copy_endpoint)
+        raw_actions.addWidget(export)
+        raw_actions.addWidget(export_diagnostics)
+        raw_actions.addStretch()
+        self.raw_tabs = QTabWidget()
+        self.raw_editors: dict[str, QPlainTextEdit] = {}
+        raw_layout.addLayout(raw_actions)
+        raw_layout.addWidget(self.raw_tabs)
+        self.diagnostics = QPlainTextEdit()
+        self.diagnostics.setReadOnly(True)
+        self.detail_tabs.addTab(self.overview_page, "Vue d'ensemble")
+        self.detail_tabs.addTab(self.autopilot_tab, "Autopilot")
+        self.detail_tabs.addTab(self.intune_tab, "Intune")
+        self.detail_tabs.addTab(self.entra_tab, "Entra ID")
+        self.detail_tabs.addTab(raw_page, "Donnees brutes")
+        self.detail_tabs.addTab(self.diagnostics, "Diagnostics")
+        root.addWidget(self.detail_tabs, 1)
+
+    def _get_service(self) -> AutopilotInspectorService:
+        if self.service is None:
+            self.service = build_autopilot_inspector()
+        return self.service
+
+    def search_devices(self) -> None:
+        query = self.search_input.text().strip()
+        if not query:
+            return
+        self._start_task(lambda: self._get_service().search_devices(query), self._search_ready, self._task_failed)
+
+    def _search_ready(self, result: object) -> None:
+        devices, logs = result  # type: ignore[misc]
+        self.search_results = list(devices)
+        clear_layout(self.results_layout)
+        if not self.search_results:
+            self.results_layout.addWidget(EmptyState("Aucun resultat", "Essayez un autre numero de serie, ID ou nom d'appareil."))
+        for index, device in enumerate(self.search_results):
+            title = device.display_name or device.serial_number or "Appareil"
+            if device.is_registered:
+                detail = (
+                    f"{not_available(device.serial_number)} · Group Tag : {not_available(device.group_tag)} · "
+                    f"{not_available(device.enrollment_state)} · "
+                    f"Derniere communication : {relative_datetime(device.last_contacted_datetime)}"
+                )
+            else:
+                detail = f"{not_available(device.serial_number)} · Non enregistre dans Autopilot"
+            button = QPushButton(f"{title}\n{detail}")
+            button.setObjectName("modeButton")
+            button.clicked.connect(lambda _=False, row=index: self.inspect_device(row))
+            self.results_layout.addWidget(button)
+        self._fill_diagnostics(logs)
+
+    def inspect_device(self, row: int) -> None:
+        if row < 0 or row >= len(self.search_results):
+            return
+        self.current_selection = self.search_results[row]
+        self._inspect_selected()
+
+    def refresh_current_device(self) -> None:
+        if not self.current_selection:
+            return
+        self._inspect_selected()
+
+    def _inspect_selected(self) -> None:
+        selection = self.current_selection
+        assert selection is not None
+        self._start_task(
+            lambda: self._get_service().inspect_device(
+                autopilot_id=selection.id,
+                fallback_managed_device_id=selection.managed_device_id,
+                fallback_serial_number=selection.serial_number,
+            ),
+            self._device_ready,
+            self._task_failed,
+        )
+
+    def _device_ready(self, result: object) -> None:
+        self.current_result = result  # type: ignore[assignment]
+        identity = self.current_result.identity
+        health = self.current_result.health
+        self.device_header.setText(identity.display_name or identity.serial_number or "Appareil")
+        status = health.status if health else "UNKNOWN"
+        self.health_summary.setText(f"Sante : {_STATUS_LABELS.get(status, status)} · {len(health.issues) if health else 0} probleme(s)")
+        last_contact = identity.last_contacted_datetime or (
+            health.intune_device.last_sync_datetime if health and health.intune_device else None
+        )
+        self.device_badges.setText(
+            f"Numero de serie : {not_available(identity.serial_number)} · Group Tag : {not_available(identity.group_tag)} · "
+            f"Derniere communication : {relative_datetime(last_contact)}"
+        )
+        self.refresh_button.setEnabled(True)
+        self._fill_chain(identity, health)
+        self._fill_issues(health)
+        self._fill_overview(identity, health)
+        self._fill_autopilot_tab(identity, health)
+        self._fill_intune_tab(health)
+        self._fill_entra_tab(health)
+        self._fill_raw_data(health)
+        self._fill_diagnostics(self.current_result.endpoint_logs)
+
+    def _fill_chain(self, identity, health: AutopilotDeviceHealth | None) -> None:
+        clear_layout(self.chain_layout)
+        self.chain_layout.addWidget(_build_chain_row(self._chain_steps(identity, health)))
+
+    def _chain_steps(self, identity, health: AutopilotDeviceHealth | None) -> list[tuple[str, str, str]]:
+        steps: list[tuple[str, str, str]] = []
+
+        if identity.id:
+            steps.append(("Autopilot", "Enregistre", "success"))
+        elif identity.serial_number or (health and health.intune_device):
+            steps.append(("Autopilot", "Non enregistre", "error"))
+        else:
+            steps.append(("Autopilot", "Inconnu", "neutral"))
+
+        profile = health.profile if health else None
+        if profile and profile.assignment_status:
+            profile_status = profile.assignment_status.casefold()
+            if profile_status in {"assignedinsync", "assignedoutofsync", "assignedunkownsyncstate"}:
+                steps.append(("Profil", "Assigne", "success"))
+            elif profile_status == "notassigned":
+                steps.append(("Profil", "Non assigne", "warning"))
+            elif profile_status == "pending":
+                steps.append(("Profil", "En attente", "warning"))
+            elif profile_status == "failed":
+                steps.append(("Profil", "Echec", "error"))
+            else:
+                steps.append(("Profil", "Inconnu", "neutral"))
+        else:
+            steps.append(("Profil", "Non disponible", "neutral"))
+
+        sources = health.sources if health else ()
+        entra_source = next((source for source in sources if source.name == "Entra device"), None)
+        if health and health.entra_device:
+            steps.append(("Entra ID", "Trouve", "success"))
+        elif entra_source and entra_source.available and entra_source.object_count and entra_source.object_count > 1:
+            steps.append(("Entra ID", "Ambigu", "warning"))
+        elif entra_source and entra_source.available:
+            steps.append(("Entra ID", "Introuvable", "error"))
+        else:
+            steps.append(("Entra ID", "Inconnu", "neutral"))
+
+        intune_source = next((source for source in sources if source.name == "Intune managedDevice"), None)
+        if health and health.intune_device:
+            steps.append(("Intune", "Gere", "success"))
+        elif intune_source and not intune_source.available and intune_source.status_code == 404:
+            steps.append(("Intune", "Introuvable", "error"))
+        elif intune_source:
+            steps.append(("Intune", "Inconnu", "neutral"))
+        else:
+            steps.append(("Intune", "Non disponible", "neutral"))
+
+        compliance_state = health.intune_device.compliance_state if health and health.intune_device else None
+        if compliance_state is None:
+            steps.append(("Conformite", "Non disponible", "neutral"))
+        elif compliance_state.casefold() == "compliant":
+            steps.append(("Conformite", "Conforme", "success"))
+        elif compliance_state.casefold() == "unknown":
+            steps.append(("Conformite", "Inconnu", "neutral"))
+        else:
+            steps.append(("Conformite", "Non conforme", "error"))
+
+        return steps
+
+    def _fill_issues(self, health: AutopilotDeviceHealth | None) -> None:
+        clear_layout(self.issues_layout)
+        issues = health.issues if health else ()
+        header = QLabel(f"Problemes detectes  {len(issues)}")
+        header.setObjectName("sectionTitle")
+        self.issues_layout.addWidget(header)
+        if not issues:
+            self.issues_layout.addWidget(
+                EmptyState("Aucun probleme detecte", "Aucun probleme deterministe n'a ete detecte a partir des donnees disponibles.")
+            )
+            return
+        for issue in issues:
+            card = QFrame()
+            card.setObjectName(
+                "issueCritical" if issue.severity in {"CRITICAL", "ERROR"} else "issueWarning" if issue.severity == "WARNING" else "issueInfo"
+            )
+            layout = QVBoxLayout(card)
+            layout.setContentsMargins(14, 12, 14, 12)
+            title = QLabel(f"{issue.severity} · {issue.title}")
+            title.setObjectName("cardTitle")
+            reason = QLabel(issue.reason)
+            reason.setObjectName("muted")
+            source = QLabel(f"Source : {issue.source}")
+            source.setObjectName("muted")
+            evidence = QLabel(f"Preuve : {issue.evidence}") if issue.evidence else None
+            if evidence:
+                evidence.setObjectName("muted")
+            layout.addWidget(title)
+            layout.addWidget(reason)
+            layout.addWidget(source)
+            if evidence:
+                layout.addWidget(evidence)
+            self.issues_layout.addWidget(card)
+        self.issues_layout.addStretch()
+
+    def _fill_overview(self, identity, health: AutopilotDeviceHealth | None) -> None:
+        clear_layout(self.overview_layout)
+        intune_device = health.intune_device if health else None
+        entra_device = health.entra_device if health else None
+        profile = health.profile if health else None
+        groups = [
+            ("AUTOPILOT", [
+                ("Numero de serie", identity.serial_number),
+                ("Group Tag", identity.group_tag),
+                ("Fabricant", identity.manufacturer),
+                ("Modele", identity.model),
+                ("Etat d'enrolement", identity.enrollment_state),
+                ("Derniere communication", identity.last_contacted_datetime),
+            ]),
+            ("PROFIL", [
+                ("Nom", profile.display_name if profile else None),
+                ("Type d'appareil", profile.device_type if profile else None),
+                ("Etat d'assignation", profile.assignment_status if profile else None),
+                ("Date d'assignation", profile.assigned_datetime if profile else None),
+            ]),
+            ("INTUNE", [
+                ("Nom du poste", intune_device.device_name if intune_device else None),
+                ("Managed Device ID", intune_device.id if intune_device else identity.managed_device_id),
+                ("Utilisateur principal", intune_device.user_principal_name if intune_device else None),
+                ("Conformite", intune_device.compliance_state if intune_device else None),
+                ("Dernier check-in", intune_device.last_sync_datetime if intune_device else None),
+            ]),
+            ("ENTRA ID", [
+                ("Display Name", entra_device.display_name if entra_device else None),
+                ("Device ID", entra_device.device_id if entra_device else identity.azure_ad_device_id),
+                ("Compte actif", entra_device.account_enabled if entra_device else None),
+                ("Trust / Join", entra_device.trust_type if entra_device else None),
+            ]),
+        ]
+        for index, (title, rows) in enumerate(groups):
+            card = Card(title)
+            grid = KeyValueGrid()
+            grid.set_rows([(label, not_available(value)) for label, value in rows])
+            card.layout.addWidget(grid)
+            self.overview_layout.addWidget(card, index // 2, index % 2)
+
+    def _fill_autopilot_tab(self, identity, health: AutopilotDeviceHealth | None) -> None:
+        clear_layout(self.autopilot_tab_layout)
+        grid = KeyValueGrid()
+        grid.set_rows(
+            [
+                ("Autopilot Device Identity ID", not_available(identity.id or None)),
+                ("Numero de serie", not_available(identity.serial_number)),
+                ("Group Tag", not_available(identity.group_tag)),
+                ("Purchase Order Identifier", not_available(identity.purchase_order_identifier)),
+                ("Fabricant", not_available(identity.manufacturer)),
+                ("Modele", not_available(identity.model)),
+                ("Etat d'enrolement", not_available(identity.enrollment_state)),
+                ("Derniere communication", not_available(identity.last_contacted_datetime)),
+                ("User Principal Name", not_available(identity.user_principal_name)),
+            ]
+        )
+        card = Card("Identite Autopilot")
+        card.layout.addWidget(grid)
+        self.autopilot_tab_layout.addWidget(card)
+
+        profile = health.profile if health else None
+        profile_grid = KeyValueGrid()
+        profile_grid.set_rows(
+            [
+                ("Nom du profil", not_available(profile.display_name if profile else None)),
+                ("Description", not_available(profile.description if profile else None)),
+                ("Type d'appareil", not_available(profile.device_type if profile else None)),
+                ("Etat d'assignation", not_available(profile.assignment_status if profile else None)),
+                ("Etat detaille", not_available(profile.assignment_detailed_status if profile else None)),
+                ("Date d'assignation", not_available(profile.assigned_datetime if profile else None)),
+            ]
+        )
+        profile_card = Card("Profil de deploiement")
+        profile_card.layout.addWidget(profile_grid)
+        self.autopilot_tab_layout.addWidget(profile_card)
+        self.autopilot_tab_layout.addStretch()
+
+    def _fill_intune_tab(self, health: AutopilotDeviceHealth | None) -> None:
+        clear_layout(self.intune_tab_layout)
+        intune_device = health.intune_device if health else None
+        if not intune_device:
+            self.intune_tab_layout.addWidget(
+                EmptyState("Correlation Intune indisponible", "Aucun managedDevice n'a pu etre resolu pour cet appareil.")
+            )
+            self.intune_tab_layout.addStretch()
+            return
+        grid = KeyValueGrid()
+        grid.set_rows(
+            [
+                ("Nom du poste", not_available(intune_device.device_name)),
+                ("Managed Device ID", not_available(intune_device.id)),
+                ("Numero de serie", not_available(intune_device.serial_number)),
+                ("Utilisateur principal", not_available(intune_device.user_principal_name)),
+                ("Modele", not_available(intune_device.model)),
+                ("OS", not_available(intune_device.operating_system)),
+                ("Version OS", not_available(intune_device.os_version)),
+                ("Conformite", not_available(intune_device.compliance_state)),
+                ("Dernier check-in", not_available(intune_device.last_sync_datetime)),
+                ("Date d'enrolement", not_available(intune_device.enrolled_datetime)),
+            ]
+        )
+        card = Card("Intune managedDevice")
+        card.layout.addWidget(grid)
+        self.intune_tab_layout.addWidget(card)
+        self.intune_tab_layout.addStretch()
+
+    def _fill_entra_tab(self, health: AutopilotDeviceHealth | None) -> None:
+        clear_layout(self.entra_tab_layout)
+        entra_device = health.entra_device if health else None
+        if not entra_device:
+            self.entra_tab_layout.addWidget(
+                EmptyState("Correlation Entra indisponible", "Aucun appareil Entra ID correspondant n'a ete confirme.")
+            )
+            self.entra_tab_layout.addStretch()
+            return
+        grid = KeyValueGrid()
+        grid.set_rows(
+            [
+                ("Display Name", not_available(entra_device.display_name)),
+                ("Device ID", not_available(entra_device.device_id)),
+                ("Object ID", not_available(entra_device.id)),
+                ("Compte actif", not_available(entra_device.account_enabled)),
+                ("Operating System", not_available(entra_device.operating_system)),
+                ("Operating System Version", not_available(entra_device.operating_system_version)),
+                ("Trust Type / Join Type", not_available(entra_device.trust_type)),
+            ]
+        )
+        card = Card("Entra ID device")
+        card.layout.addWidget(grid)
+        self.entra_tab_layout.addWidget(card)
+        self.entra_tab_layout.addStretch()
+
+    def _fill_raw_data(self, health: AutopilotDeviceHealth | None) -> None:
+        self.raw_tabs.clear()
+        self.raw_editors = {}
+        raw_sources = health.raw_sources if health else {}
+        sources = health.sources if health else ()
+        for title, payload in raw_sources.items():
+            editor = QPlainTextEdit()
+            editor.setReadOnly(True)
+            editor.setPlainText(json.dumps(_raw_payload_with_metadata(title, payload, sources), indent=2, sort_keys=True))
+            self.raw_tabs.addTab(editor, title)
+            self.raw_editors[title] = editor
+
+    def _fill_diagnostics(self, logs) -> None:
+        health = self.current_result.health if self.current_result else None
+        text = _build_diagnostics_text(health.capabilities if health else (), health.sources if health else (), logs)
+        self.diagnostics.setPlainText(text)
+
+    def copy_raw_data(self) -> None:
+        editor = self.raw_tabs.currentWidget()
+        if isinstance(editor, QPlainTextEdit):
+            QApplication.clipboard().setText(editor.toPlainText())
+
+    def export_raw_data(self) -> None:
+        if not self.current_result:
+            return
+        name = self.current_result.identity.serial_number or self.current_result.identity.id or "autopilot-device"
+        path, _ = QFileDialog.getSaveFileName(self, "Exporter le JSON brut", f"{name}.json", "JSON (*.json)")
+        if path:
+            editor = self.raw_tabs.currentWidget()
+            if isinstance(editor, QPlainTextEdit):
+                Path(path).write_text(editor.toPlainText(), encoding="utf-8")
+
+    def copy_current_endpoint(self) -> None:
+        if not self.current_result or not self.current_result.health:
+            return
+        title = self.raw_tabs.tabText(self.raw_tabs.currentIndex())
+        source = _find_source_for_title(title, self.current_result.health.sources)
+        if source:
+            QApplication.clipboard().setText(source.endpoint)
+
+    def export_diagnostics_bundle(self) -> None:
+        if not self.current_result:
+            return
+        directory = QFileDialog.getExistingDirectory(self, "Exporter les diagnostics")
+        if not directory:
+            return
+        path = export_autopilot_support_bundle(self.current_result, Path(directory))
+        QMessageBox.information(self, "Diagnostics exportes", f"Support bundle cree :\n{path}")
+
+    def _task_failed(self, message: str) -> None:
+        QMessageBox.critical(self, "Autopilot Troubleshooter", message)
+        self.diagnostics.setPlainText(message)
+
+
+_STATUS_LABELS = {
+    "HEALTHY": "Sain",
+    "ATTENTION": "Attention",
+    "DEGRADED": "Degrade",
+    "UNKNOWN": "Inconnu",
+}
 
 
 class SettingsPage(QWidget, AsyncPageMixin):
@@ -1191,7 +1699,7 @@ class SettingsPage(QWidget, AsyncPageMixin):
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 24, 24, 24)
         root.setSpacing(16)
-        card = Card("Microsoft Graph", "Credentials are stored using the operating system secure credential store.")
+        card = Card("Microsoft Graph", "Les identifiants sont stockes via le gestionnaire de secrets securise du systeme d'exploitation.")
         form = QFormLayout()
         self.tenant_id = QLineEdit()
         self.client_id = QLineEdit()
@@ -1200,19 +1708,19 @@ class SettingsPage(QWidget, AsyncPageMixin):
         self.stale_days = QSpinBox()
         self.stale_days.setRange(1, 365)
         self.stale_days.setValue(7)
-        self.status = StatusBadge("Not configured", "neutral")
-        form.addRow("Status", self.status)
+        self.status = StatusBadge("Non configure", "neutral")
+        form.addRow("Statut", self.status)
         form.addRow("Tenant ID", self.tenant_id)
         form.addRow("Client ID", self.client_id)
         form.addRow("Client Secret", self.client_secret)
-        form.addRow("Stale device threshold", self.stale_days)
+        form.addRow("Seuil stale device (jours)", self.stale_days)
         card.layout.addLayout(form)
         actions = QHBoxLayout()
-        test = SecondaryButton("Test Connection")
+        test = SecondaryButton("Tester la connexion")
         test.clicked.connect(self.test_connection)
-        save = PrimaryButton("Save")
+        save = PrimaryButton("Enregistrer")
         save.clicked.connect(self.save_configuration)
-        clear = SecondaryButton("Clear configuration")
+        clear = SecondaryButton("Effacer la configuration")
         clear.clicked.connect(self.clear_configuration)
         actions.addWidget(test)
         actions.addWidget(save)
@@ -1223,7 +1731,7 @@ class SettingsPage(QWidget, AsyncPageMixin):
         self.progress.setRange(0, 0)
         self.progress.hide()
         card.layout.addWidget(self.progress)
-        self.advanced = CollapsibleSection("Advanced / Diagnostics")
+        self.advanced = CollapsibleSection("Avance / Diagnostics")
         self.diagnostics = QPlainTextEdit()
         self.diagnostics.setReadOnly(True)
         self.diagnostics.setMaximumHeight(120)
@@ -1236,16 +1744,16 @@ class SettingsPage(QWidget, AsyncPageMixin):
     def load_configuration(self) -> None:
         settings = self.config_store.load()
         if not settings:
-            self.status.set_state("neutral", "Not configured")
+            self.status.set_state("neutral", "Non configure")
             return
         self.tenant_id.setText(settings.tenant_id)
         self.client_id.setText(settings.client_id)
         self.stale_days.setValue(settings.stale_device_days)
         try:
             has_secret = bool(self.secret_store.get_secret(settings))
-            self.status.set_state("warning" if not has_secret else "neutral", "Secret missing" if not has_secret else "Configured")
+            self.status.set_state("warning" if not has_secret else "neutral", "Secret manquant" if not has_secret else "Configure")
         except SecureStorageUnavailable:
-            self.status.set_state("error", "Secure storage unavailable")
+            self.status.set_state("error", "Stockage securise indisponible")
 
     def _settings_from_form(self) -> GraphSettings:
         return GraphSettings(self.tenant_id.text().strip(), self.client_id.text().strip(), self.stale_days.value())
@@ -1253,19 +1761,19 @@ class SettingsPage(QWidget, AsyncPageMixin):
     def save_configuration(self) -> None:
         settings = self._settings_from_form()
         if not settings.is_configured:
-            QMessageBox.warning(self, "Microsoft Graph", "Tenant ID and Client ID are required.")
+            QMessageBox.warning(self, "Microsoft Graph", "Tenant ID et Client ID sont requis.")
             return
         try:
             if self.client_secret.text().strip():
                 self.secret_store.set_secret(settings, self.client_secret.text().strip())
                 self.client_secret.clear()
             elif not self.secret_store.get_secret(settings):
-                QMessageBox.warning(self, "Microsoft Graph", "Client Secret is required the first time you save.")
+                QMessageBox.warning(self, "Microsoft Graph", "Le Client Secret est requis lors du premier enregistrement.")
                 return
             self.config_store.save(settings)
-            self.status.set_state("neutral", "Saved")
+            self.status.set_state("neutral", "Enregistre")
         except SecureStorageUnavailable as exc:
-            self.status.set_state("error", "Secure storage unavailable")
+            self.status.set_state("error", "Stockage securise indisponible")
             QMessageBox.critical(self, "Microsoft Graph", exc.user_message)
 
     def clear_configuration(self) -> None:
@@ -1280,7 +1788,7 @@ class SettingsPage(QWidget, AsyncPageMixin):
         self.client_id.clear()
         self.client_secret.clear()
         self.stale_days.setValue(7)
-        self.status.set_state("neutral", "Not configured")
+        self.status.set_state("neutral", "Non configure")
         self.diagnostics.clear()
 
     def test_connection(self) -> None:
@@ -1291,7 +1799,7 @@ class SettingsPage(QWidget, AsyncPageMixin):
             self._task_failed(exc.user_message)
             return
         if not settings.is_configured or not secret:
-            QMessageBox.warning(self, "Microsoft Graph", "Tenant ID, Client ID and Client Secret are required.")
+            QMessageBox.warning(self, "Microsoft Graph", "Tenant ID, Client ID et Client Secret sont requis.")
             return
 
         def task() -> GraphRequestLog:
@@ -1303,13 +1811,13 @@ class SettingsPage(QWidget, AsyncPageMixin):
 
     def _connection_tested(self, result: object) -> None:
         log = result  # type: ignore[assignment]
-        self.status.set_state("success", "Connected")
+        self.status.set_state("success", "Connecte")
         self.diagnostics.setPlainText(
-            f"Endpoint: {log.url}\nHTTP status: {log.status_code}\nDuration: {log.duration_ms} ms\nObjects returned: {log.object_count}"
+            f"Endpoint : {log.url}\nStatus HTTP : {log.status_code}\nDuree : {log.duration_ms} ms\nObjets retournes : {log.object_count}"
         )
 
     def _task_failed(self, message: str) -> None:
-        self.status.set_state("error", "Graph Error")
+        self.status.set_state("error", "Erreur Graph")
         QMessageBox.critical(self, "Microsoft Graph", message)
         self.diagnostics.setPlainText(message)
 
@@ -1353,7 +1861,7 @@ class MainWindow(QMainWindow):
         header.setObjectName("pageHeader")
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(24, 16, 24, 16)
-        self.header_title = QLabel("Home")
+        self.header_title = QLabel("Accueil")
         self.header_title.setObjectName("pageTitle")
         self.graph_status = StatusBadge()
         header_layout.addWidget(self.header_title, 1)
@@ -1363,12 +1871,12 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.stack, 1)
 
         self.pages: dict[str, QWidget] = {}
-        self._add_page("Home", HomePage(self.navigate), QStyle.SP_DirHomeIcon)
+        self._add_page("Accueil", HomePage(self.navigate), QStyle.SP_DirHomeIcon)
         self._add_page("Intune", make_scroll_page(IntunePage()), QStyle.SP_ComputerIcon)
-        self._add_page("Entra ID", make_scroll_page(PlaceholderPage("Entra ID", "Read-only inspectors will arrive in a later phase.")), QStyle.SP_FileDialogDetailedView)
-        self._add_page("Autopilot", make_scroll_page(PlaceholderPage("Autopilot Inspector", "Coming soon.")), QStyle.SP_DriveHDIcon)
-        self._add_page("Deployment Tools", make_scroll_page(DeploymentToolsPage()), QStyle.SP_FileDialogNewFolder)
-        self._add_page("Settings", make_scroll_page(SettingsPage()), QStyle.SP_FileDialogContentsView)
+        self._add_page("Entra ID", make_scroll_page(PlaceholderPage("Entra ID", "Les inspecteurs en lecture seule arriveront dans une phase ulterieure.")), QStyle.SP_FileDialogDetailedView)
+        self._add_page("Autopilot", make_scroll_page(AutopilotPage()), QStyle.SP_DriveHDIcon)
+        self._add_page("Outils de deploiement", make_scroll_page(DeploymentToolsPage()), QStyle.SP_FileDialogNewFolder)
+        self._add_page("Parametres", make_scroll_page(SettingsPage()), QStyle.SP_FileDialogContentsView)
         self.nav.currentRowChanged.connect(self._switch_page)
         return content
 
@@ -1398,14 +1906,14 @@ class MainWindow(QMainWindow):
     def refresh_graph_status(self) -> None:
         settings = GraphConfigStore().load()
         if not settings:
-            self.graph_status.set_state("neutral", "Graph Not configured")
+            self.graph_status.set_state("neutral", "Graph non configure")
             return
         try:
             has_secret = bool(GraphSecretStore().get_secret(settings))
         except SecureStorageUnavailable:
-            self.graph_status.set_state("error", "Graph Error")
+            self.graph_status.set_state("error", "Erreur Graph")
             return
-        self.graph_status.set_state("success" if has_secret else "warning", "Graph Connected" if has_secret else "Graph Secret missing")
+        self.graph_status.set_state("success" if has_secret else "warning", "Graph connecte" if has_secret else "Graph secret manquant")
 
 
 def run_app() -> None:

@@ -94,13 +94,13 @@ def test_inspect_device_parses_managed_device() -> None:
 def test_non_compliant_issue() -> None:
     device = parse_managed_device({**managed_device_payload(), "complianceState": "noncompliant"})
     issues = detect_device_issues(device)
-    assert any(issue.severity == "CRITICAL" and "non-compliant" in issue.title for issue in issues)
+    assert any(issue.severity == "CRITICAL" and issue.id == "intune.non_compliant" for issue in issues)
 
 
 def test_stale_device_issue() -> None:
     device = parse_managed_device({**managed_device_payload(), "lastSyncDateTime": "2020-01-01T00:00:00Z"})
     issues = detect_device_issues(device, stale_device_days=7)
-    assert any("Last check-in" in issue.title and "7 days" in issue.reason for issue in issues)
+    assert any(issue.id == "intune.stale_check_in" and "7" in issue.reason for issue in issues)
 
 
 def test_not_encrypted_and_missing_data_issues() -> None:
@@ -113,10 +113,10 @@ def test_not_encrypted_and_missing_data_issues() -> None:
         },
         primary_users=(),
     )
-    titles = {issue.title for issue in detect_device_issues(device)}
-    assert "Device not encrypted" in titles
-    assert "No primary user" in titles
-    assert "OS information missing" in titles
+    issue_ids = {issue.id for issue in detect_device_issues(device)}
+    assert "intune.not_encrypted" in issue_ids
+    assert "intune.no_user" in issue_ids
+    assert "intune.missing_os" in issue_ids
 
 
 def test_missing_secret_blocks_service_factory(tmp_path) -> None:

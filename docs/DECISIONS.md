@@ -99,3 +99,33 @@ Raison : les payloads Graph bruts utilisent camelCase (`clientSecret`, `accessTo
 Decision : `parse_graph_datetime` attache explicitement `timezone.utc` a une date sans indication de fuseau au lieu de laisser Python l'interpreter dans le fuseau local de la machine.
 
 Raison : Microsoft Graph retourne toujours des dates UTC (`Z`) ; une conversion basee sur le fuseau local du poste de l'ingenieur aurait pu fausser silencieusement les calculs de "stale device" selon le fuseau horaire local.
+
+## D019 - Autopilot : modeles et parsers Intune/Entra reutilises tels quels
+
+Decision : `app/autopilot/models.py` importe et reutilise directement `ManagedDevice`, `EntraDevice`, `DeviceIssue`, `SourceStatus`, `Capability`, `HealthStatus` et `CapabilityState` de `app.intune.models` au lieu de creer des types Autopilot dupliques. `app/autopilot/inspector.py` reutilise de meme `parse_managed_device`, `MANAGED_DEVICE_SELECT`, `ENTRA_DEVICE_SELECT`, `_with_source` (`app.intune.device_inspector`) et `parse_entra_device` (`app.intune.health`).
+
+Raison : le modele de capacites, la correlation Entra et la representation d'un managedDevice sont deja corrects et testes depuis la Phase 3.1 ; les dupliquer pour Autopilot aurait cree deux sources de verite a maintenir en parallele sans benefice.
+
+## D020 - Un seul appel beta pour le profil Autopilot, isole comme D015
+
+Decision : seul `GET {beta}/deviceManagement/windowsAutopilotDeviceIdentities/{id}?$expand=deploymentProfile` utilise `/beta/`. Isole dans une seule methode de `AutopilotInspectorService.inspect_device`, avec repli propre (capacite `PERMISSION_MISSING`/`API_UNAVAILABLE`/`ERROR`, jamais d'exception qui casse le reste du diagnostic).
+
+Raison : v1.0 est prioritaire par principe (meme regle que D015). Documentation Microsoft Learn confirmee : la ressource `windowsAutopilotDeviceIdentity` v1.0 n'expose aucune relationship ; `deploymentProfile`, `deploymentProfileAssignmentStatus` et les champs associes n'existent qu'en beta. Il n'y a donc pas d'alternative v1.0 pour obtenir un profil reellement assigne.
+
+## D021 - Priorite a l'identifiant Entra non deprecie pour la correlation Autopilot
+
+Decision : pour correler un appareil Autopilot vers Entra ID, `identity.azure_ad_device_id` (v1.0, documente "to be deprecated") n'est utilise qu'en repli lorsque `managedDevice.azureADDeviceId` (Intune, non deprecie) n'est pas disponible.
+
+Raison : utiliser en priorite un champ que Microsoft documente comme voue a disparaitre aurait rendu la correlation moins fiable a moyen terme sans raison, alors qu'un champ equivalent non deprecie est deja lu par ailleurs (Intune managedDevice).
+
+## D022 - Resolution de recherche Autopilot toujours ramenee au numero de serie
+
+Decision : quel que soit l'identifiant saisi (Autopilot ID, Managed Device ID, Entra Device ID, nom de poste), `AutopilotInspectorService.search_devices` resout d'abord un numero de serie via Intune/Entra puis interroge `windowsAutopilotDeviceIdentities` avec `contains(serialNumber, ...)`.
+
+Raison : `windowsAutopilotDeviceIdentities` ne supporte fiablement que `contains()` sur `serialNumber` en `$filter` (l'operateur `eq` n'est pas fiable sur cet endpoint). Passer par le numero de serie evite de s'appuyer sur un filtre non garanti sur d'autres proprietes de cette ressource.
+
+## D023 - Un appareil resolu hors Autopilot reste visible comme "non enregistre"
+
+Decision : lorsque la recherche resout un appareil via Intune ou Entra mais qu'aucun enregistrement Autopilot ne correspond a son numero de serie, `search_devices` renvoie tout de meme un `AutopilotSearchResult` avec `id=""`, et `inspect_device` construit un `AutopilotDeviceHealth` avec une identite vide plutot que d'echouer.
+
+Raison : "savoir si un appareil est enregistre dans Autopilot" fait partie de la definition de fait de ce module (item 3, Phase 4). Sans cette decision, l'absence de resultat Autopilot serait indiscernable d'une recherche qui n'a simplement rien trouve.

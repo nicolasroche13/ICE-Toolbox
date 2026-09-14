@@ -17,7 +17,7 @@ class GraphSecretStore:
 
     def set_secret(self, settings: GraphSettings, secret: str) -> None:
         if not secret:
-            raise SecureStorageUnavailable("Client Secret is empty.")
+            raise SecureStorageUnavailable("Le Client Secret est vide.")
         keyring = self._keyring()
         keyring.set_password(SERVICE_NAME, self._username(settings), secret)
 
@@ -33,13 +33,13 @@ class GraphSecretStore:
             import keyring
             from keyring.errors import NoKeyringError
         except Exception as exc:
-            raise SecureStorageUnavailable("Install keyring to store Client Secret securely.") from exc
+            raise SecureStorageUnavailable("Installez le paquet keyring pour stocker le Client Secret de maniere securisee.") from exc
 
         try:
             backend_name = keyring.get_keyring().__class__.__name__.lower()
             if "fail" in backend_name or "null" in backend_name:
-                raise SecureStorageUnavailable("No secure keyring backend is available.")
+                raise SecureStorageUnavailable("Aucun backend keyring securise n'est disponible.")
             return keyring
         except NoKeyringError as exc:
-            raise SecureStorageUnavailable("No secure keyring backend is available.") from exc
+            raise SecureStorageUnavailable("Aucun backend keyring securise n'est disponible.") from exc
 

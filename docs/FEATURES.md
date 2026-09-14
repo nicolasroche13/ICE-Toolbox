@@ -76,13 +76,32 @@
 - [x] Recherche trim + insensible a la casse (tolower) pour serial number et Entra Device ID.
 - [x] Dates Graph normalisees en UTC, y compris les dates sans fuseau.
 
+## Phase 4 - Autopilot Troubleshooter
+
+- [x] Page Autopilot activee (navigation + quick tool Home).
+- [x] Recherche par numero de serie (cas d'usage principal), Autopilot Device Identity ID, Intune Managed Device ID, Entra Device ID et nom de poste via Intune.
+- [x] Normalisation des espaces dans le numero de serie ; pas de fuzzy matching ; aucune selection arbitraire en cas d'ambiguite.
+- [x] Modele `AutopilotDeviceHealth` consolide : identite Autopilot, profil assigne, correlation Intune, correlation Entra ID, sources, capacites, erreurs partielles, raw data.
+- [x] Carte de synthese immediate apres selection (numero de serie, Group Tag, profil, Intune, Entra ID, derniere communication).
+- [x] Chaine visuelle Autopilot -> Profil -> Entra ID -> Intune -> Conformite avec etats OK/ATTENTION/ERREUR/INCONNU/NON DISPONIBLE.
+- [x] Profil Autopilot : nom, type, etat d'assignation et date d'assignation lus depuis Graph beta, jamais deduits d'une appartenance a un groupe.
+- [x] Group Tag affiche tel quel ; son absence n'est jamais traitee comme une erreur.
+- [x] 10 regles Autopilot Health deterministes avec id/severity/source/evidence, respectant UNKNOWN != FALSE.
+- [x] Panne partielle (Profil, Intune ou Entra en erreur) sans jamais casser le reste du diagnostic.
+- [x] Endpoint beta (`windowsAutopilotDeviceIdentities?$expand=deploymentProfile`) isole, avec repli propre ; tout le reste du module reste en v1.0.
+- [x] Cinq nouvelles capacites (Autopilot Identity, Enrollment Information, Autopilot Profile, Intune Correlation, Entra Correlation) sur le meme modele a six etats.
+- [x] Sections Vue d'ensemble / Autopilot / Intune / Entra ID / Donnees brutes / Diagnostics, sans sous-onglets complexes.
+- [x] Raw Data et Diagnostics etendus (source, endpoint, API version, status, duree, objets, request-id) via les memes fonctions de rendu que Device Inspector.
+- [x] Support Bundle Autopilot dedie (`EndpointToolbox-Autopilot-{serial}-{timestamp}.zip`), sanitise par la meme fonction centrale que Phase 3.1.
+- [x] Refresh read-only, aucun appel Graph ne bloque l'UI (meme mecanisme async que Device Inspector).
+
 ## Hors perimetre actuel
 
 - [ ] Application Deployment Monitoring complet.
 - [ ] Compliance Policy troubleshooting detaille.
 - [ ] Device Compare.
-- [ ] Autopilot Inspector.
-- [ ] Autopilot Deployment Analyzer.
+- [ ] Autopilot Import, modification de Group Tag, suppression de device, assignation de profil, Intune Sync.
+- [ ] Autopilot Deployment Analyzer / Fleet Health.
 - [ ] Entra User Inspector.
 - [ ] Entra Group Inspector.
 - [ ] Conditional Access.

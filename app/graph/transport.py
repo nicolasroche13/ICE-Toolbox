@@ -50,10 +50,10 @@ class UrlLibTransport:
             duration = int((time.monotonic() - started) * 1000)
             return HttpResponse(exc.code, dict(exc.headers), exc.read(), duration)
         except socket.timeout as exc:
-            raise GraphTimeoutError("Microsoft Graph request timed out.") from exc
+            raise GraphTimeoutError("La requete Microsoft Graph a expire (timeout).") from exc
         except URLError as exc:
             reason = getattr(exc, "reason", None)
             if isinstance(reason, socket.timeout):
-                raise GraphTimeoutError("Microsoft Graph request timed out.") from exc
-            raise GraphNetworkError(f"Unable to reach Microsoft Graph: {reason}") from exc
+                raise GraphTimeoutError("La requete Microsoft Graph a expire (timeout).") from exc
+            raise GraphNetworkError(f"Impossible de joindre Microsoft Graph : {reason}") from exc
 

@@ -2,19 +2,20 @@
 
 Endpoint Toolbox est une application desktop Python/PySide6 pour les ingenieurs Endpoint et Microsoft 365.
 
-La Phase 2 ajoute une fondation Microsoft Graph strictement read-only et un premier outil Intune Device Inspector. La Phase 2.5 refond l'UX autour d'une interface plus simple, Figma-inspired, avec disclosure progressif. La Phase 3 transforme l'inspection en Device Health read-only multi-source.
+La Phase 2 ajoute une fondation Microsoft Graph strictement read-only et un premier outil Intune Device Inspector. La Phase 2.5 refond l'UX autour d'une interface plus simple, Figma-inspired, avec disclosure progressif. La Phase 3 transforme l'inspection en Device Health read-only multi-source. La Phase 4 ajoute un Autopilot Troubleshooter read-only.
 
 ## Perimetre actuel
 
-- Application desktop PySide6, sans serveur web local.
+- Application desktop PySide6, sans serveur web local, interface entierement en francais (vocabulaire Microsoft Graph technique conserve en anglais).
 - Navigation principale : Home, Intune, Entra ID, Autopilot, Deployment Tools, Settings.
 - Deployment Tools : split, rings progressifs, tailles custom, exclusions, stratification, Representative Pilot, imports/exports.
 - Settings : configuration Microsoft Graph app-only.
 - Intune : recherche de managed devices et Device Inspector read-only.
 - Device Health : correlation Intune / Entra ID, issues deterministes, compliance device-level, applications device-level, raw data multi-source.
+- Autopilot Troubleshooter : recherche par numero de serie (et autres identifiants), correlation Autopilot -> Profil -> Entra ID -> Intune, chaine visuelle, issues deterministes, Support Bundle dedie.
 - Graph : OAuth2 client credentials, token cache, GET uniquement, pagination, retry 429, erreurs lisibles.
 - Secrets : Client Secret stocke dans le keychain systeme via `keyring`, jamais dans le JSON local.
-- UX Phase 2.5 : sidebar sombre, header Graph, Home orientee quick tools, Deployment Tools en parcours Source / Configuration / Preview / Export, Intune exception-first.
+- UX Phase 2.5 : sidebar sombre, header Graph, Home orientee quick tools, Deployment Tools en parcours Source / Configuration / Preview / Export, Intune et Autopilot exception-first.
 
 ## Installation
 
@@ -63,6 +64,19 @@ Workflow :
 
 Endpoint Toolbox n'execute aucune action Intune : pas de sync, restart, wipe, retire, delete ou modification.
 
+## Autopilot Troubleshooter
+
+Workflow :
+
+1. Aller dans Autopilot.
+2. Rechercher un appareil par numero de serie (cas d'usage principal), Autopilot Device Identity ID, Intune Managed Device ID, Entra Device ID ou nom de poste.
+3. Selectionner un resultat (un appareil resolu via Intune mais absent d'Autopilot apparait comme "non enregistre").
+4. Lire la carte de synthese, la chaine Autopilot -> Profil -> Entra ID -> Intune -> Conformite, puis les problemes detectes.
+5. Consulter Vue d'ensemble, Autopilot, Intune, Entra ID, Donnees brutes et Diagnostics.
+6. Utiliser Actualiser pour relire Microsoft Graph, sans declencher de synchronisation Autopilot ou Intune.
+
+Endpoint Toolbox n'execute aucune action Autopilot : pas d'import, modification de Group Tag, suppression, assignation de profil ou synchronisation.
+
 ## Tests
 
 ```bash
@@ -81,6 +95,7 @@ Avec le virtualenv local :
 - `docs/DECISIONS.md` : decisions produit et techniques.
 - `docs/FEATURES.md` : fonctionnalites livrees et backlog.
 - `docs/GRAPH_PERMISSIONS.md` : permissions Graph minimales.
+- `docs/GRAPH_ENDPOINTS.md` : reference technique de chaque endpoint Graph (URL, version, filtres, limitations).
 - `docs/SECURITY.md` : posture securite.
 - `docs/DEVELOPMENT.md` : guide de reprise.
 - `docs/TESTING.md` : strategie de tests.

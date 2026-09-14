@@ -20,9 +20,10 @@ Endpoint Toolbox est une application desktop locale pour preparer, inspecter et 
 - `app/models` : dataclasses partagees Deployment Tools.
 - `app/graph` : configuration, secret store, OAuth2, client GET-only, erreurs et transport HTTP.
 - `app/intune` : services et modeles metier Intune read-only.
+- `app/autopilot` : services et modeles metier Autopilot Troubleshooter read-only (Phase 4).
 - `app/ui/components.py` : composants visuels reutilisables.
 - `app/ui/styles.py` : feuille de style centralisee et design tokens pratiques.
-- `app/entra`, `app/autopilot` : placeholders pour phases ulterieures.
+- `app/entra` : placeholder pour phase ulterieure (Entra ID read-only complet).
 - `tests` : tests pytest sans tenant Microsoft reel.
 
 ## Graph read-only
@@ -116,3 +117,39 @@ Deployment Tools est organise en quatre etapes visuelles : Source, Configuration
 ## Raw data et diagnostics
 
 Le Device Inspector expose le JSON Graph brut par source : Intune Managed Device, Entra Device, Applications et Compliance, sans token ni secret. Le diagnostic affiche source, endpoint, status HTTP, duree, nombre d'objets retournes et erreur lisible en cas de permission manquante.
+
+## Autopilot Troubleshooter (Phase 4)
+
+Module dedie `app/autopilot/` :
+
+- `app/autopilot/models.py` : `AutopilotIdentity`, `AutopilotProfileAssignment`, `AutopilotSearchResult`, `AutopilotDeviceHealth`, `AutopilotInspectorResult`. Reutilise directement `ManagedDevice`, `EntraDevice`, `DeviceIssue`, `SourceStatus`, `Capability`, `HealthStatus` et `CapabilityState` de `app.intune.models` plutot que de les dupliquer.
+- `app/autopilot/health.py` : `parse_autopilot_identity`, `parse_autopilot_profile`, `generate_autopilot_issues` (regles deterministes, memes principes que `app/intune/health.py`).
+- `app/autopilot/inspector.py` : `AutopilotInspectorService` (recherche + inspection), seul point d'appel Graph du module. Reutilise `parse_managed_device`, `MANAGED_DEVICE_SELECT`, `ENTRA_DEVICE_SELECT` et `_with_source` de `app.intune.device_inspector`, et `parse_entra_device` de `app.intune.health`.
+- `app/autopilot/support_bundle.py` : export zip dedie, reutilise `sanitize_for_export` et `non_overwriting_path`.
+- `app/graph/factory.py` expose `build_autopilot_inspector`, symetrique de `build_intune_device_inspector`.
+- `AutopilotPage` (`app/ui/main_window.py`) ne contient aucune logique Graph : elle appelle uniquement `AutopilotInspectorService`.
+
+### Endpoints Graph Autopilot
+
+Voir `docs/GRAPH_ENDPOINTS.md` pour le detail complet (URL, version, proprietes, filtres, permissions). Resume :
+
+- `GET /deviceManagement/windowsAutopilotDeviceIdentities` (recherche) et `/{id}` (get) : **v1.0**.
+- `GET {beta}/deviceManagement/windowsAutopilotDeviceIdentities/{id}?$expand=deploymentProfile` : **beta uniquement** (profil de deploiement assigne et statut d'assignation ; aucun equivalent v1.0 documente pour cette relation). Isole, optionnel, avec repli propre - memes principes que D015 pour `mobileAppTroubleshootingEvents`.
+- Correlation Intune (`managedDevices/{managedDeviceId}`) et Entra (`devices?$filter=deviceId eq '...'`) : reutilisation directe des endpoints v1.0 deja utilises par Device Health, a partir des identifiants renvoyes par l'identite Autopilot.
+
+### Recherche Autopilot
+
+`AutopilotInspectorService.search_devices` accepte numero de serie (cas d'usage principal), Autopilot Device Identity ID, Intune Managed Device ID, Entra Device ID (GUID) et nom de poste (via Intune). La resolution se ramene toujours a un numero de serie, seule cle interrogeable de maniere fiable sur `windowsAutopilotDeviceIdentities` :
+
+1. GUID : tentative directe comme Autopilot Identity ID, puis comme Managed Device ID (bascule vers son `serialNumber`), puis comme Entra Device ID (bascule via `managedDevices?$filter=azureADDeviceId eq '...'` vers un `serialNumber`).
+2. Non-GUID : recherche directe par `contains(serialNumber, ...)`, puis repli sur une recherche de nom de poste Intune (`contains(deviceName, ...)`) dont chaque `serialNumber` resultant est ensuite verifie sur Autopilot.
+
+Un appareil resolu via Intune mais absent d'Autopilot est renvoye comme resultat "non enregistre" (`AutopilotSearchResult.id == ""`) plutot que d'etre silencieusement ignore : `AutopilotDeviceHealth` peut alors afficher la correlation Intune/Entra tout en signalant l'absence Autopilot (`autopilot_not_registered`). Aucune selection n'est jamais automatique en cas d'ambiguite (plusieurs devices Entra, plusieurs serials identiques) : tous les resultats plausibles sont renvoyes.
+
+### Issues Autopilot
+
+`app/autopilot/health.py` genere des `DeviceIssue` (id anglais, texte UI francais) : `autopilot_not_registered`, `profile_not_assigned`, `profile_assignment_failed`, `intune_device_missing`, `entra_device_missing`, `correlation_ambiguous`, `entra_device_disabled`, `intune_device_stale`, `identifier_mismatch`, `critical_data_unavailable`. Toutes respectent UNKNOWN != FALSE : un statut de profil `unknown`, un Group Tag absent ou une date manquante ne generent jamais une issue par defaut - seule une valeur confirmee (`notAssigned`, `failed`, 404 explicite, etc.) le fait. L'absence de Group Tag n'est delibarement jamais une issue (aucune regle fiable ne permet de l'affirmer comme anormale).
+
+### Capacites Autopilot
+
+Cinq capacites ajoutees au meme modele a six etats : `Autopilot Identity`, `Enrollment Information` (meme source que l'identite), `Autopilot Profile` (beta, isole), `Intune Correlation`, `Entra Correlation`.

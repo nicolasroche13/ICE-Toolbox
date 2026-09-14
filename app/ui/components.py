@@ -49,7 +49,7 @@ class SectionHeader(QWidget):
 
 
 class StatusBadge(QLabel):
-    def __init__(self, text: str = "Not configured", state: str = "neutral"):
+    def __init__(self, text: str = "Non configure", state: str = "neutral"):
         super().__init__(text)
         self.set_state(state, text)
 

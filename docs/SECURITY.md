@@ -38,7 +38,7 @@ Ils ne doivent jamais afficher :
 - Client Secret ;
 - header Authorization.
 
-Le support bundle (`app/intune/support_bundle.py`) passe systematiquement par `app/utils/sanitize.py` avant export. La sanitisation reconnait les cles sensibles en snake_case et en camelCase (`client_secret`/`clientSecret`, `access_token`/`accessToken`, `refresh_token`/`refreshToken`, `id_token`/`idToken`) ainsi que toute cle contenant `authorization`, de maniere recursive dans les dictionnaires, listes et tuples.
+Le support bundle (`app/intune/support_bundle.py` et `app/autopilot/support_bundle.py`) passe systematiquement par `app/utils/sanitize.py` avant export. La sanitisation reconnait les cles sensibles en snake_case et en camelCase (`client_secret`/`clientSecret`, `access_token`/`accessToken`, `refresh_token`/`refreshToken`, `id_token`/`idToken`) ainsi que toute cle contenant `authorization`, de maniere recursive dans les dictionnaires, listes et tuples.
 
 ## Donnees utilisateur
 
@@ -55,3 +55,12 @@ Les echecs partiels sont traites localement :
 - 403 sur une source : affichage permission manquante pour la section concernee ;
 - 404 sur une source optionnelle : source indisponible ;
 - aucune elevation ou permission ReadWrite n'est ajoutee automatiquement.
+
+## Read-only Phase 4 (Autopilot)
+
+Le module Autopilot est strictement read-only comme le reste de l'application :
+
+- aucun POST/PATCH/PUT/DELETE Graph, y compris pour Group Tag, assignation de profil, import ou suppression de device ;
+- aucune action `assignUserToDevice`, `updateDeviceProperties`, `deleteDevices` ou `assign` (profil) n'est implementee, meme si ces actions existent dans l'API Graph Autopilot ;
+- le bouton Refresh de la page Autopilot relit Graph en GET et ne declenche ni synchronisation Autopilot ni synchronisation Intune ;
+- le Support Bundle Autopilot (`app/autopilot/support_bundle.py`) passe par la meme sanitisation centrale que le Support Bundle Intune avant export.

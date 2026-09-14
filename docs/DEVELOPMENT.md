@@ -26,9 +26,10 @@ python main.py
 4. API permissions > Add a permission > Microsoft Graph > Application permissions.
 5. Ajouter `DeviceManagementManagedDevices.Read.All`.
 6. Ajouter `Device.Read.All` pour la correlation Entra ID.
-7. Cliquer sur Grant admin consent.
-8. Endpoint Toolbox > Settings > saisir Tenant ID, Client ID, Client Secret.
-9. Test Connection puis Save Configuration.
+7. Ajouter `DeviceManagementServiceConfig.Read.All` pour Autopilot Troubleshooter (Phase 4).
+8. Cliquer sur Grant admin consent.
+9. Endpoint Toolbox > Settings > saisir Tenant ID, Client ID, Client Secret.
+10. Test Connection puis Save Configuration.
 
 Ne jamais committer Tenant ID, Client ID reel ou Client Secret.
 
@@ -41,7 +42,12 @@ Ne jamais committer Tenant ID, Client ID reel ou Client Secret.
 - `app/intune/device_inspector.py` : recherche et inspection read-only.
 - `app/intune/models.py` : objets `ManagedDevice`, `DeviceHealth`, sources et statuts applicatifs.
 - `app/intune/health.py` : regles deterministes Device Health et parsers multi-source.
-- `app/ui/main_window.py` : pages Settings, Intune et Deployment Tools.
+- `app/autopilot/inspector.py` : recherche et inspection Autopilot read-only (`AutopilotInspectorService`).
+- `app/autopilot/models.py` : objets Autopilot ; reutilise `ManagedDevice`/`EntraDevice`/`DeviceIssue`/`SourceStatus`/`Capability` de `app.intune.models`.
+- `app/autopilot/health.py` : parsers et regles deterministes Autopilot Health.
+- `app/autopilot/support_bundle.py` : export Support Bundle Autopilot.
+- `app/graph/factory.py` : `build_intune_device_inspector` et `build_autopilot_inspector`.
+- `app/ui/main_window.py` : pages Settings, Intune, Autopilot et Deployment Tools.
 - `app/ui/components.py` : cards, status badges, search boxes, collapsible sections et composants communs.
 - `app/ui/styles.py` : QSS centralisee pour le langage visuel.
 
@@ -65,16 +71,27 @@ Ne jamais committer Tenant ID, Client ID reel ou Client Secret.
 - Device Health ;
 - Compliance Details ;
 - Application Install Status ;
-- Autopilot ;
 - Troubleshoot Device.
+
+Autopilot Troubleshooter (Phase 4) est livre ; les extensions restantes (Fleet Health, Autopilot Import, Device Compare) restent hors perimetre tant qu'elles ne sont pas explicitement demandees.
 
 Ne pas coupler les futures fonctionnalites a une seule reponse brute Graph.
 
 ## Tester sans tenant
 
-Les tests Phase 3 utilisent des clients Graph factices dans `tests/test_device_health.py`. Pour ajouter une source, mocker la reponse HTTP/Graph attendue et couvrir au minimum :
+Les tests Phase 3 utilisent des clients Graph factices dans `tests/test_device_health.py`. Les tests Phase 4 suivent le meme principe dans `tests/test_autopilot.py` (`AutopilotFakeGraphClient`). Pour ajouter une source, mocker la reponse HTTP/Graph attendue et couvrir au minimum :
 
 - succes ;
 - 403 permission manquante ;
-- donnees absentes ;
+- 404 partiel ;
+- donnees absentes / nulles ;
 - raw data et diagnostic.
+
+## Reprendre le module Autopilot
+
+Pour ajouter une fonctionnalite Autopilot (ex. Autopilot Import en ecriture dans une phase future) :
+
+1. Lire `docs/GRAPH_ENDPOINTS.md` avant tout nouvel endpoint - confirmer v1.0 vs beta sur la documentation Microsoft Learn actuelle, jamais de memoire.
+2. Toute nouvelle action d'ecriture reste hors du `GraphReadOnlyClient` existant (qui bloque POST/PATCH/PUT/DELETE par construction) : elle necessiterait un client distinct, une decision explicite documentee dans `docs/DECISIONS.md`, et l'accord de l'utilisateur avant implementation.
+3. Reutiliser `app.intune.models` / `app.intune.device_inspector` / `app.intune.health` plutot que dupliquer (voir D019).
+4. Toute regle Autopilot Health doit respecter UNKNOWN != FALSE et vivre dans `app/autopilot/health.py`, jamais dans l'UI.
