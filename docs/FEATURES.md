@@ -115,11 +115,34 @@
 - [x] Reutilisation explicite des mecanismes Phase 3.1/4 : compose `IntuneDeviceInspectorService` et `AutopilotInspectorService` plutot que de reimplementer leur logique de recherche/correlation.
 - [x] Refresh read-only, asynchrone, meme mecanisme que Device Inspector/Autopilot.
 
+## Phase 6 - Device Workspace (vue "Appareil" unifiee)
+
+- [x] Page "Appareil" activee (navigation, juste apres Accueil + quick tool Home).
+- [x] Recherche unique acceptant 6 types d'identifiant : numero de serie, nom du poste, Managed Device ID Intune, Entra Object ID, Entra `deviceId`, Autopilot Device Identity ID.
+- [x] Resolution "ancree" deterministe : GUID -> Intune puis Autopilot puis Entra ; texte -> Autopilot (serial) puis Intune (nom, repli). Ordre fixe et documente (DECISIONS.md D029), jamais heuristique.
+- [x] Aucune selection arbitraire en cas d'ambiguite a aucune etape de la resolution.
+- [x] `DeviceWorkspaceService` compose `IntuneDeviceInspectorService`, `AutopilotInspectorService` et `EntraInspectorService` (une seule instance de chaque, un seul `GraphReadOnlyClient` partage) : aucune regle metier dupliquee, aucun quatrieme moteur de diagnostic (DECISIONS.md D028).
+- [x] `ResolvedIdentity` consolide chaque identifiant connu avec sa source d'origine et detecte les incoherences entre sources (`IdentityConflict`), sans remplacer ni dupliquer `identifier_mismatch` (DECISIONS.md D031).
+- [x] Health Summary consolide reutilisant les memes 5 etats existants (OK/ATTENTION/ERREUR/INCONNU/NON DISPONIBLE), calcule par agregation pure des statuts deja produits par les trois modules.
+- [x] Points d'attention consolides : union des `DeviceIssue` des trois modules, chaque issue conservant sa source d'origine visible.
+- [x] Capacites consolidees : union des `Capability` des trois modules (modele a six etats inchange).
+- [x] Carte de synthese immediate + chaine visuelle Autopilot -> Profil -> Entra ID -> Intune -> Conformite.
+- [x] Carte identite affichant tous les identifiants resolus, leur source, et un badge de conflit si `IdentityConflict` detecte.
+- [x] Trois blocs de synthese (Autopilot / Entra ID / Intune), chacun avec un lien "Ouvrir dans <module>" qui navigue vers la page specialisee en reutilisant l'identifiant deja resolu (pas de nouvelle saisie, pas de triple recherche automatique).
+- [x] Detail asymetrique assume selon l'ancrage plutot que des appels Graph d'enrichissement supplementaires (DECISIONS.md D032).
+- [x] Donnees brutes et Diagnostics consolides, organises par source (Autopilot / Entra / Intune), sanitises par la meme fonction centrale.
+- [x] Support Bundle "Appareil" dedie (`EndpointToolbox-Appareil-{nom}-{timestamp}.zip`), sept fichiers JSON distincts dans une seule archive - pas trois ZIP imbriques.
+- [x] Aucun appel Graph direct dans `app/workspace/` : seule methode declenchee, `AutopilotInspectorService.search_devices(serial)`, deja utilisee par Entra (D025) - meme endpoint, meme permission, aucun appel beta supplementaire.
+- [x] Refresh read-only, asynchrone, meme mecanisme que Device Inspector/Autopilot/Entra.
+- [x] Panne partielle de n'importe laquelle des trois sources (401/403/404/429/5xx) sans jamais casser la vue consolidee.
+
 ## Hors perimetre actuel
 
 - [ ] Application Deployment Monitoring complet.
 - [ ] Compliance Policy troubleshooting detaille.
-- [ ] Device Compare.
+- [ ] Device Compare, comparaison multi-device.
+- [ ] Historique de recherche, favoris, liste de parc, dashboard global multi-device.
+- [ ] Export CSV.
 - [ ] Autopilot Import, modification de Group Tag, suppression de device, assignation de profil, Intune Sync.
 - [ ] Autopilot Deployment Analyzer / Fleet Health.
 - [ ] Entra User Inspector, Entra Group Inspector, utilisateurs/groupes Entra generiques.

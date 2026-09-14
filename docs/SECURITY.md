@@ -74,3 +74,13 @@ Le module Entra ID Inspector est strictement read-only comme le reste de l'appli
 - `alternativeSecurityIds` et `physicalIds` (documentes "internal use only" par Microsoft) ne sont jamais lus ni exposes ;
 - le bouton Actualiser de la page Entra ID relit Graph en GET et ne declenche aucune action sur Entra ID, Intune ou Autopilot ;
 - le Support Bundle Entra (`app/entra/support_bundle.py`) passe par la meme sanitisation centrale que les autres Support Bundle avant export.
+
+## Read-only Phase 6 (Device Workspace)
+
+La page "Appareil" est une orchestration pure, strictement read-only :
+
+- `app/workspace/` n'effectue aucun appel Graph direct hormis une reutilisation de `AutopilotInspectorService.search_devices` (meme methode, meme permission, meme endpoint GET deja utilise depuis Entra ID, D025) ; aucun endpoint, permission ou appel beta supplementaire n'est introduit ;
+- aucun POST/PATCH/PUT/DELETE Graph : la page ne fait que composer les resultats deja lus par les trois modules Intune/Autopilot/Entra ;
+- le bouton Refresh relit Graph en GET via les trois services composes et ne declenche aucune action sur le tenant ;
+- les liens "Ouvrir dans <module>" naviguent vers une page specialisee deja read-only, sans jamais declencher d'action supplementaire ;
+- le Support Bundle "Appareil" (`app/workspace/support_bundle.py`) passe par la meme sanitisation centrale que les autres Support Bundle avant export, pour chacune des sept sections JSON qu'il regroupe dans une seule archive.

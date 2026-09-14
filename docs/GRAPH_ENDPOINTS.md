@@ -95,6 +95,10 @@ Depuis un device Entra ID resolu, la correlation reutilise les endpoints deja do
 - Intune : `GET /deviceManagement/managedDevices?$filter=azureADDeviceId eq '{deviceId}'` (meme pattern que la correlation Autopilot -> Intune de Phase 4). Un resultat vide (200, 0 objet) est traite comme "correlation non trouvee", jamais comme une erreur.
 - Autopilot : reutilise directement `AutopilotInspectorService.search_devices(serial)` (le serial provenant du managedDevice Intune deja correle) plutot que de dupliquer la logique `contains(serialNumber, ...)` - voir D025. N'appelle jamais l'endpoint beta du profil Autopilot (`$expand=deploymentProfile`) : la page Entra affiche uniquement l'identite Autopilot de base, pas le profil, pour eviter un appel beta additionnel non demande par cette page.
 
+## Device Workspace - aucun nouvel endpoint (Phase 6)
+
+Le module `app/workspace/` n'appelle jamais Microsoft Graph directement. Toutes les donnees affichees proviennent des appels deja documentes ci-dessus, effectues par `IntuneDeviceInspectorService`, `AutopilotInspectorService` et `EntraInspectorService`. La seule chose que le Workspace declenche lui-meme est un appel a la methode publique `AutopilotInspectorService.search_devices(serial)` lorsque l'ancrage de resolution est Intune (dont l'inspecteur n'a aucune notion d'Autopilot) - **le meme appel**, au meme endpoint (`GET /deviceManagement/windowsAutopilotDeviceIdentities?$filter=contains(serialNumber, ...)`), que celui deja utilise par `EntraInspectorService` depuis la page Entra ID (D025). Aucun endpoint supplementaire, aucune permission supplementaire, aucun appel beta supplementaire.
+
 ## Recapitulatif v1.0 / beta
 
 | Endpoint | Version |
@@ -105,4 +109,4 @@ Depuis un device Entra ID resolu, la correlation reutilise les endpoints deja do
 | windowsAutopilotDeviceIdentities (liste, get) | v1.0 |
 | windowsAutopilotDeviceIdentities?$expand=deploymentProfile | beta (isole) |
 
-v1.0 reste prioritaire pour toute nouvelle fonctionnalite. Un appel beta doit rester isole, optionnel, documente ici, et avec repli propre - jamais une dependance silencieuse. **Phase 5 (Entra ID) n'introduit aucun nouvel appel beta** : toutes les proprietes demandees existent en v1.0.
+v1.0 reste prioritaire pour toute nouvelle fonctionnalite. Un appel beta doit rester isole, optionnel, documente ici, et avec repli propre - jamais une dependance silencieuse. **Phase 5 (Entra ID) et Phase 6 (Device Workspace) n'introduisent aucun nouvel appel beta ni aucun nouvel endpoint** : Phase 5 n'utilise que des proprietes v1.0, Phase 6 n'est qu'une orchestration des endpoints deja existants.

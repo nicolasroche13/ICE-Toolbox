@@ -160,11 +160,26 @@ Support Bundle Entra (`tests/test_entra_support_bundle.py`) :
 - nom de fichier `EndpointToolbox-Entra-{nom}-{timestamp}.zip` ;
 - export non destructif.
 
+Device Workspace (`tests/test_workspace.py`) :
+
+- recherche par chacun des 6 identifiants supportes (numero de serie, nom du poste, Managed Device ID Intune, Entra Object ID, Entra `deviceId`, Autopilot Device Identity ID) ;
+- ancrage GUID priorise Intune -> Autopilot -> Entra, verifie explicitement selon la source disponible ;
+- ancrage texte priorise Autopilot (serial) -> Intune (nom, repli), y compris le cas ou seul Intune connait le device (`autopilot_results=[]`) ;
+- combinaisons de sources presentes/absentes (Autopilot seul, Entra seul, Intune seul, toutes presentes, aucune) ;
+- ambiguite a chaque etape de resolution (plusieurs candidats Intune/Autopilot/Entra) : aucune selection arbitraire ;
+- panne partielle 403/429/5xx sur chacune des trois sources sans casser la vue consolidee ;
+- `IdentityConflict` detecte quand deux sources rapportent des valeurs differentes pour le meme identifiant, sans creer de `DeviceIssue` et sans dupliquer `identifier_mismatch` ;
+- UNKNOWN != FALSE preserve a travers la consolidation (aucun champ absent traduit en etat negatif) ;
+- Health Summary, points d'attention et capacites consolides : agregation fidele des `DeviceIssue`/`Capability`/`SourceStatus` des trois modules, source d'origine toujours preservee ;
+- Support Bundle "Appareil" : sept sections JSON attendues, sanitisation (secrets/tokens absents y compris dans le raw JSON de chaque source), nom de fichier `EndpointToolbox-Appareil-{nom}-{timestamp}.zip`, export non destructif ;
+- Refresh read-only reutilisant le meme mecanisme asynchrone que les trois pages specialisees.
+
 ## Gaps connus
 
 - Pas encore de tests UI automatises : le build PySide6 local ne fournit pas de plugin platform `offscreen` ou `minimal`.
 - Pas encore de validation Windows Credential Manager automatisee.
-- Pas encore de tests contre un tenant de sandbox reel (Intune, Entra ID et Autopilot). Aucune App Registration n'existe encore cote tenant au 2026-09-14 ; toute la couverture Phase 1 a 5 repose sur des transports/clients Graph factices.
-- Pas encore de tests UI automatises pour Refresh et tabs Device Inspector / Autopilot / Entra ID ; la logique sous-jacente est couverte par tests metier mockes.
+- Pas encore de tests contre un tenant de sandbox reel (Intune, Entra ID et Autopilot). Aucune App Registration n'existe encore cote tenant au 2026-09-14 ; toute la couverture Phase 1 a 6 (159 tests au total) repose sur des transports/clients Graph factices.
+- Pas encore de tests UI automatises pour Refresh et tabs Device Inspector / Autopilot / Entra ID / Appareil ; la logique sous-jacente est couverte par tests metier mockes.
 - Autopilot specifiquement non valide contre un vrai tenant : recherche multi-identifiant, `contains(serialNumber, ...)` avec des serials reels, appel beta du profil, et surtout le risque de faux positif documente sur `identifier_mismatch` (voir `docs/GRAPH_PERMISSIONS.md`, section Validation tenant reel).
 - Entra ID specifiquement non valide contre un vrai tenant : recherche par `displayName` (egalite exacte - comportement reel non confirme), `deviceId eq` sur devices, et la definition du seuil "stale" a 90 jours (jamais confrontee a des dates de connexion reelles).
+- Device Workspace herite integralement des inconnues de validation d'Autopilot et d'Entra ID ci-dessus, puisqu'il ne fait qu'orchestrer ces deux modules et Intune ; aucun comportement de resolution/priorisation propre au Workspace n'a ete confronte a un tenant reel non plus (voir `docs/GRAPH_PERMISSIONS.md`, section Validation tenant reel).

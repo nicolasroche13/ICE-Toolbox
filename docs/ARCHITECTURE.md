@@ -22,6 +22,7 @@ Endpoint Toolbox est une application desktop locale pour preparer, inspecter et 
 - `app/intune` : services et modeles metier Intune read-only.
 - `app/autopilot` : services et modeles metier Autopilot Troubleshooter read-only (Phase 4).
 - `app/entra` : services et modeles metier Entra ID Inspector read-only (Phase 5).
+- `app/workspace` : couche d'orchestration "Appareil" (Phase 6), compose Intune/Autopilot/Entra sans dupliquer leurs regles.
 - `app/ui/components.py` : composants visuels reutilisables.
 - `app/ui/styles.py` : feuille de style centralisee et design tokens pratiques.
 - `tests` : tests pytest sans tenant Microsoft reel.
@@ -194,3 +195,34 @@ Une regle `os_version_mismatch` (Entra `operatingSystemVersion` vs Intune `osVer
 ### Capacites Entra ID
 
 Trois capacites sur le meme modele a six etats : `Entra Device`, `Intune Correlation`, `Autopilot Correlation`.
+
+## Device Workspace - vue "Appareil" (Phase 6)
+
+Module dedie `app/workspace/`, **couche d'orchestration pure** : aucune nouvelle regle Health, aucun nouveau modele de verite, aucun nouvel appel Graph au-dela d'une seule correlation deja etablie (voir plus bas).
+
+- `app/workspace/models.py` : `WorkspaceSearchResult`, `ResolvedIdentity`, `IdentityConflict`, `AutopilotBlock`, `EntraBlock`, `IntuneBlock`, `DeviceWorkspaceResult`. Ne recopie aucun champ des modeles Autopilot/Entra/Intune sans necessite : les "blocs" sont des projections calculees a la volee pour l'UI, pas une nouvelle source de verite. Reutilise `Capability`, `DeviceIssue`, `SourceStatus`, `HealthStatus` de `app.intune.models`.
+- `app/workspace/service.py` : `DeviceWorkspaceService`, qui compose `IntuneDeviceInspectorService`, `AutopilotInspectorService` et `EntraInspectorService` (memes instances, un seul `GraphReadOnlyClient` partage via `build_device_workspace`). N'appelle jamais un endpoint Graph directement, a une seule exception documentee ci-dessous.
+- `app/workspace/support_bundle.py` : export multi-fichiers dans une seule archive, reutilise `sanitize_for_export` et `non_overwriting_path`.
+- `app/graph/factory.py` expose `build_device_workspace`.
+- `WorkspacePage` (`app/ui/main_window.py`) ne contient aucune logique Graph : elle appelle uniquement `DeviceWorkspaceService`. Les pages Intune/Autopilot/Entra ID existantes ne sont ni supprimees ni modifiees dans leur fonctionnement propre ; chacune gagne une methode `open_with_identifier(identifier)` pour etre pilotee depuis la page Appareil sans redemander la recherche a l'utilisateur.
+
+### Pourquoi aucun nouvel endpoint Graph
+
+Toutes les donnees affichees par le Workspace proviennent d'appels que Intune/Autopilot/Entra effectuent deja pour leur propre compte. La seule exception : lorsque l'ancrage de resolution est Intune (l'inspecteur Intune n'a lui-meme aucune notion d'Autopilot), le Workspace declenche `AutopilotInspectorService.search_devices(serial)` - **exactement le meme appel** que `EntraInspectorService` fait deja depuis la page Entra ID (D025), pas un nouveau pattern. Il n'appelle jamais le profil Autopilot beta depuis ce contexte : si l'ancrage n'est pas deja Autopilot, le bloc "Profil" reste "Non disponible" plutot que de declencher un appel supplementaire seulement pour l'enrichir.
+
+### Strategie de resolution d'identite
+
+`DeviceWorkspaceService.search_devices` classe la requete (GUID ou texte) puis delegue, dans un ordre fixe, aux `search_devices()` deja existants de chaque module - jamais de reimplementation :
+
+- GUID : Intune d'abord (couvre Managed Device ID et, indirectement, tout GUID qu'un managedDevice referencerait), puis Autopilot (couvre Autopilot Device ID et, indirectement, Managed Device ID / Entra deviceId via ses propres mecanismes de bascule), puis Entra (couvre Object ID et deviceId). Le premier module qui renvoie un resultat non ambigu devient l'ancre.
+- Texte : Autopilot d'abord (le numero de serie reste l'identifiant pivot prefere, D022), puis repli sur Intune (`contains(deviceName, ...)`) qui trouve tout appareil par nom independamment de son enregistrement Autopilot - **Autopilot seul ne suffit pas** pour ce cas : son propre pont nom->serie ignore silencieusement les appareils Intune-only trouves par nom (limitation pre-existante documentee dans `docs/GRAPH_PERMISSIONS.md`), donc le Workspace interroge Intune directement plutot que de se fier uniquement au pont interne d'Autopilot.
+
+Selon l'ancre retenue, chaque module correle deja les deux autres a des degres de detail variables (ex: l'ancre Autopilot donne un profil complet mais un Entra allege ; l'ancre Entra donne un Entra complet mais un Autopilot sans profil). Le Workspace n'essaie jamais de "completer" ces trous par un appel supplementaire - une case manquante affiche "Non disponible", jamais une valeur inventee.
+
+### Consolidation Health / issues / capacites
+
+`DeviceWorkspaceResult.issues`, `.sources` et `.capabilities` sont la concatenation directe de ce que le module ancre a deja produit, plus - uniquement pour l'ancrage Intune - une capacite et un statut de source supplementaires pour le pont Autopilot. `DeviceWorkspaceResult.status` applique le meme calcul de severite maximale (CRITICAL/ERROR -> DEGRADED, WARNING -> ATTENTION, sinon HEALTHY) que `DeviceHealth.status`, `AutopilotDeviceHealth.status` et `EntraDeviceHealth.status` prennent chacun deja isolement - ce n'est pas un nouveau systeme de severite, c'est le meme motif applique une quatrieme fois sur des issues qui portent deja leur propre severite d'origine.
+
+### Conflits d'identifiants
+
+`ResolvedIdentity` fusionne les valeurs (serial, nom, deviceId Entra) rapportees par plusieurs sources : si toutes concordent (apres normalisation trim/casse), une seule valeur est retenue avec sa source ; si elles divergent, un `IdentityConflict` liste toutes les valeurs concurrentes avec leur source, sans jamais en cacher une. Cette detection est purement presentationnelle : elle ne remplace pas et ne duplique pas la regle `identifier_mismatch` d'Autopilot, qui reste la seule a produire une issue avec severite sur ce sujet.

@@ -2,21 +2,22 @@
 
 Endpoint Toolbox est une application desktop Python/PySide6 pour les ingenieurs Endpoint et Microsoft 365.
 
-La Phase 2 ajoute une fondation Microsoft Graph strictement read-only et un premier outil Intune Device Inspector. La Phase 2.5 refond l'UX autour d'une interface plus simple, Figma-inspired, avec disclosure progressif. La Phase 3 transforme l'inspection en Device Health read-only multi-source. La Phase 4 ajoute un Autopilot Troubleshooter read-only. La Phase 5 ajoute un Entra ID Inspector (devices) read-only.
+La Phase 2 ajoute une fondation Microsoft Graph strictement read-only et un premier outil Intune Device Inspector. La Phase 2.5 refond l'UX autour d'une interface plus simple, Figma-inspired, avec disclosure progressif. La Phase 3 transforme l'inspection en Device Health read-only multi-source. La Phase 4 ajoute un Autopilot Troubleshooter read-only. La Phase 5 ajoute un Entra ID Inspector (devices) read-only. La Phase 6 ajoute une vue "Appareil" (Device Workspace) read-only qui unifie Autopilot, Entra ID et Intune pour un meme poste.
 
 ## Perimetre actuel
 
 - Application desktop PySide6, sans serveur web local, interface entierement en francais (vocabulaire Microsoft Graph technique conserve en anglais).
-- Navigation principale : Home, Intune, Entra ID, Autopilot, Deployment Tools, Settings.
+- Navigation principale : Accueil, Appareil, Intune, Entra ID, Autopilot, Deployment Tools, Settings.
 - Deployment Tools : split, rings progressifs, tailles custom, exclusions, stratification, Representative Pilot, imports/exports.
 - Settings : configuration Microsoft Graph app-only.
 - Intune : recherche de managed devices et Device Inspector read-only.
 - Device Health : correlation Intune / Entra ID, issues deterministes, compliance device-level, applications device-level, raw data multi-source.
 - Autopilot Troubleshooter : recherche par numero de serie (et autres identifiants), correlation Autopilot -> Profil -> Entra ID -> Intune, chaine visuelle, issues deterministes, Support Bundle dedie.
 - Entra ID Inspector : recherche par Object ID, deviceId, displayName, numero de serie ou Managed Device ID, correlation Entra -> Intune -> Autopilot, chaine visuelle, issues deterministes, Support Bundle dedie. Aucun appel beta.
+- Appareil (Device Workspace) : recherche unique par numero de serie, nom de poste, Managed Device ID Intune, Entra Object ID, Entra deviceId ou Autopilot Device Identity ID ; vue consolidee Autopilot/Entra ID/Intune sans dupliquer leurs regles metier ; acces direct vers chaque page specialisee ; Support Bundle unique.
 - Graph : OAuth2 client credentials, token cache, GET uniquement, pagination, retry 429, erreurs lisibles.
 - Secrets : Client Secret stocke dans le keychain systeme via `keyring`, jamais dans le JSON local.
-- UX Phase 2.5 : sidebar sombre, header Graph, Home orientee quick tools, Deployment Tools en parcours Source / Configuration / Preview / Export, Intune/Autopilot/Entra ID exception-first.
+- UX Phase 2.5 : sidebar sombre, header Graph, Home orientee quick tools, Deployment Tools en parcours Source / Configuration / Preview / Export, Intune/Autopilot/Entra ID/Appareil exception-first.
 
 ## Installation
 
@@ -90,6 +91,21 @@ Workflow :
 6. Utiliser Actualiser pour relire Microsoft Graph, sans declencher d'action sur Entra ID, Intune ou Autopilot.
 
 Endpoint Toolbox n'execute aucune action Entra ID : pas d'activation/desactivation, suppression de device, ni gestion d'utilisateurs, de groupes ou de Conditional Access.
+
+## Appareil (Device Workspace)
+
+Workflow :
+
+1. Aller dans Appareil (juste apres Accueil).
+2. Rechercher un poste par numero de serie, nom de poste, Managed Device ID Intune, Entra Object ID, Entra deviceId ou Autopilot Device Identity ID - une seule recherche, six types d'identifiant.
+3. Lire la carte de synthese, la chaine Autopilot -> Profil -> Entra ID -> Intune -> Conformite, puis les points d'attention consolides (chaque probleme garde sa source d'origine visible).
+4. Consulter la carte identite (tous les identifiants connus, avec leur source, et un badge si une incoherence est detectee entre deux sources).
+5. Depuis les blocs Autopilot / Entra ID / Intune, cliquer "Ouvrir dans <module>" pour aller directement a la page specialisee correspondante sans ressaisir l'identifiant.
+6. Consulter Donnees brutes et Diagnostics consolides par source.
+7. Utiliser Actualiser pour relire Microsoft Graph via les trois modules, sans declencher aucune action sur le tenant.
+8. Exporter un Support Bundle "Appareil" unique regroupant les sept sections (identite, health, capacites, Autopilot, Entra, Intune, diagnostics).
+
+La vue Appareil n'introduit aucune nouvelle permission, aucun nouvel endpoint et aucun nouvel appel beta : elle orchestre uniquement les trois modules Autopilot, Entra ID et Intune deja existants.
 
 ## Tests
 

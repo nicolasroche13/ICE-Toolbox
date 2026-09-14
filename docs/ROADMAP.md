@@ -94,7 +94,21 @@ Statut : implemente (tests mockes uniquement). **Validation contre un tenant Mic
 - Aucune permission Graph supplementaire : reutilise `Device.Read.All` deja documente depuis Phase 3.
 - 35 tests dedies (recherche, correlation, panne partielle 401/403/404/429/5xx, stale, sanitisation du support bundle).
 
-## Phase 6 - Entra ID au-dela de l'inspection device (hors perimetre actuel)
+## Phase 6 - Device Workspace (vue "Appareil" unifiee) read-only
+
+Statut : implemente (tests mockes uniquement). **Validation contre un tenant Microsoft reel non effectuee**, meme situation que Phases 4 et 5. Voir `docs/GRAPH_PERMISSIONS.md` (section Validation tenant reel) et `NEXT.md`.
+
+- Module `app/workspace/` (models, service, support_bundle) : couche d'orchestration pure, aucune nouvelle regle metier, aucun nouvel appel Graph au-dela d'une seule correlation Autopilot legere deja etablie (D025) reutilisee depuis un autre point d'entree.
+- `DeviceWorkspaceService` compose `IntuneDeviceInspectorService`, `AutopilotInspectorService` et `EntraInspectorService` (memes instances, un seul `GraphReadOnlyClient` partage) plutot que de dupliquer leur logique de recherche ou de correlation.
+- Recherche unifiee par numero de serie, nom du poste, Managed Device ID Intune, Entra Object ID, Entra deviceId et Autopilot Device Identity ID ; resolution "ancree" sur le premier service qui repond (Autopilot en priorite pour un serial reconnu, sinon Intune, sinon Entra pour un GUID), sans jamais choisir arbitrairement en cas d'ambiguite.
+- `ResolvedIdentity` consolide les identifiants connus avec leur source d'origine et detecte les incoherences entre sources (`IdentityConflict`) sans dupliquer ni remplacer la regle `identifier_mismatch` d'Autopilot.
+- Synthese globale (Health Summary), points d'attention consolides et capacites consolidees : agregation pure des `DeviceIssue`/`Capability`/`SourceStatus` deja produits par les trois modules, aucune nouvelle regle de severite.
+- Page "Appareil" : recherche unique, carte de synthese, chaine visuelle Autopilot -> Profil -> Entra ID -> Intune -> Conformite, points d'attention, carte identite, trois blocs synthetiques (Autopilot/Entra/Intune) avec acces direct vers chaque page specialisee en reutilisant l'identifiant deja resolu (pas de nouvelle recherche automatique), Donnees brutes et Diagnostics consolides.
+- Support Bundle "Appareil" dedie (`EndpointToolbox-Appareil-{nom}-{timestamp}.zip`), sept fichiers JSON distincts (identity/health/capabilities/autopilot/entra/intune/diagnostics) dans une seule archive sanitisee - pas trois ZIP imbriques.
+- Aucune permission Graph supplementaire, aucun nouvel endpoint, aucun nouvel appel beta.
+- 28 tests dedies (recherche par chaque identifiant, combinaisons de sources presentes/absentes, pannes partielles 403/429/5xx, ambiguite, conflit d'identifiants, UNKNOWN, consolidation, Support Bundle, Refresh).
+
+## Phase 7 - Entra ID au-dela de l'inspection device (hors perimetre actuel)
 
 - User Inspector.
 - Group Inspector.
