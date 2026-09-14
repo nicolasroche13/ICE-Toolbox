@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from app.core.paths import user_data_dir
 from app.graph.models import GraphSettings
 
 
-CONFIG_DIR = Path.home() / ".endpoint_toolbox"
+CONFIG_DIR = user_data_dir()
 GRAPH_CONFIG_FILE = CONFIG_DIR / "graph_config.json"
 
 
