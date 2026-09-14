@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.autopilot.inspector import AutopilotInspectorService
+from app.entra.inspector import EntraInspectorService
 from app.graph.auth import ClientCredentialsAuth
 from app.graph.client import GraphReadOnlyClient
 from app.graph.config import GraphConfigStore
@@ -38,3 +39,14 @@ def build_autopilot_inspector(
 ) -> AutopilotInspectorService:
     auth, settings = _resolve_auth(config_store, secret_store)
     return AutopilotInspectorService(GraphReadOnlyClient(auth), stale_device_days=settings.stale_device_days)
+
+
+def build_entra_inspector(
+    config_store: GraphConfigStore | None = None,
+    secret_store: GraphSecretStore | None = None,
+) -> EntraInspectorService:
+    auth, settings = _resolve_auth(config_store, secret_store)
+    client = GraphReadOnlyClient(auth)
+    intune_service = IntuneDeviceInspectorService(client, stale_device_days=settings.stale_device_days)
+    autopilot_service = AutopilotInspectorService(client, stale_device_days=settings.stale_device_days)
+    return EntraInspectorService(client, intune_service, autopilot_service, stale_device_days=settings.stale_device_days)
