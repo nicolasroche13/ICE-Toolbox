@@ -38,7 +38,7 @@ Ils ne doivent jamais afficher :
 - Client Secret ;
 - header Authorization.
 
-Le support bundle (`app/intune/support_bundle.py` et `app/autopilot/support_bundle.py`) passe systematiquement par `app/utils/sanitize.py` avant export. La sanitisation reconnait les cles sensibles en snake_case et en camelCase (`client_secret`/`clientSecret`, `access_token`/`accessToken`, `refresh_token`/`refreshToken`, `id_token`/`idToken`) ainsi que toute cle contenant `authorization`, de maniere recursive dans les dictionnaires, listes et tuples.
+Le support bundle (`app/intune/support_bundle.py`, `app/autopilot/support_bundle.py` et `app/entra/support_bundle.py`) passe systematiquement par `app/utils/sanitize.py` avant export. La sanitisation reconnait les cles sensibles en snake_case et en camelCase (`client_secret`/`clientSecret`, `access_token`/`accessToken`, `refresh_token`/`refreshToken`, `id_token`/`idToken`) ainsi que toute cle contenant `authorization`, de maniere recursive dans les dictionnaires, listes et tuples.
 
 ## Donnees utilisateur
 
@@ -64,3 +64,13 @@ Le module Autopilot est strictement read-only comme le reste de l'application :
 - aucune action `assignUserToDevice`, `updateDeviceProperties`, `deleteDevices` ou `assign` (profil) n'est implementee, meme si ces actions existent dans l'API Graph Autopilot ;
 - le bouton Refresh de la page Autopilot relit Graph en GET et ne declenche ni synchronisation Autopilot ni synchronisation Intune ;
 - le Support Bundle Autopilot (`app/autopilot/support_bundle.py`) passe par la meme sanitisation centrale que le Support Bundle Intune avant export.
+
+## Read-only Phase 5 (Entra ID)
+
+Le module Entra ID Inspector est strictement read-only comme le reste de l'application :
+
+- aucun POST/PATCH/PUT/DELETE Graph, y compris pour activer/desactiver ou supprimer un device Entra ID (actions qui existent dans l'API Graph mais ne sont pas implementees) ;
+- aucune lecture d'utilisateurs, groupes ou Conditional Access : le module reste limite aux devices, permission `Device.Read.All` uniquement ;
+- `alternativeSecurityIds` et `physicalIds` (documentes "internal use only" par Microsoft) ne sont jamais lus ni exposes ;
+- le bouton Actualiser de la page Entra ID relit Graph en GET et ne declenche aucune action sur Entra ID, Intune ou Autopilot ;
+- le Support Bundle Entra (`app/entra/support_bundle.py`) passe par la meme sanitisation centrale que les autres Support Bundle avant export.

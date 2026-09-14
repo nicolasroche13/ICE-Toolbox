@@ -16,6 +16,7 @@ Endpoint Toolbox utilise uniquement des permissions Microsoft Graph **Applicatio
 | Compliance device-level | champs `complianceState` sur `managedDevice` | v1.0 | `DeviceManagementManagedDevices.Read.All` | Oui | Afficher l'etat de conformite sans details de policy inventes. |
 | Autopilot Search / Identity | `GET /deviceManagement/windowsAutopilotDeviceIdentities` et `GET /deviceManagement/windowsAutopilotDeviceIdentities/{id}` | v1.0 | `DeviceManagementServiceConfig.Read.All` | Oui | Rechercher et lire l'identite Autopilot (serial, Group Tag, managedDeviceId, azureActiveDirectoryDeviceId, enrollmentState). |
 | Autopilot Profile Assignment | `GET /deviceManagement/windowsAutopilotDeviceIdentities/{id}?$expand=deploymentProfile` | beta (pas d'equivalent v1.0) | `DeviceManagementServiceConfig.Read.All` | Oui | Lire le profil de deploiement reellement assigne et son statut d'assignation. Isole, optionnel, avec repli propre. |
+| Entra Device Detail | `GET /devices/{id}` et `GET /devices?$filter=deviceId eq '...' ou displayName eq '...'` | v1.0 | `Device.Read.All` | Oui (deja accorde depuis Phase 3) | Rechercher et lire l'identite Entra ID complete (accountEnabled, isCompliant, isManaged, trustType, dates) pour la page Entra ID (Phase 5). **Aucune permission supplementaire : reutilise `Device.Read.All` deja documente.** |
 
 ## Sources Microsoft
 
@@ -36,6 +37,8 @@ Documentation Microsoft Graph officielle consultee :
 - `windowsAutopilotDeviceIdentity resource type (beta, deploymentProfile*)` : https://learn.microsoft.com/en-us/graph/api/resources/intune-enrollment-windowsautopilotdeviceidentity?view=graph-rest-beta
 - `Get windowsAutopilotDeploymentProfile (beta)` : https://learn.microsoft.com/en-us/graph/api/intune-shared-windowsautopilotdeploymentprofile-get?view=graph-rest-beta
 - `windowsAutopilotDeploymentProfile resource type (beta)` : https://learn.microsoft.com/en-us/graph/api/resources/intune-shared-windowsautopilotdeploymentprofile?view=graph-rest-beta
+- `device resource type (v1.0)` : https://learn.microsoft.com/en-us/graph/api/resources/device?view=graph-rest-1.0
+- `Get device` : https://learn.microsoft.com/en-us/graph/api/device-get?view=graph-rest-1.0
 
 ## Hors scope
 
@@ -65,9 +68,17 @@ Si une future information necessite une permission plus large, elle doit etre do
 - `_search_by_serial` (utilise en cascade depuis la recherche par nom de poste et par Managed Device ID) ne capture pas les erreurs Graph individuellement : un serial candidat qui provoquerait un statut non 2xx sur `windowsAutopilotDeviceIdentities` interromprait toute la resolution au lieu d'etre simplement ignore. Non corrige tant qu'aucun cas reel ne le confirme necessaire (voir "Validation tenant reel" ci-dessous).
 - **Risque de faux positif documente pour `identifier_mismatch`** : la regle compare `identity.azure_ad_device_id` (Autopilot, deprecie) et `managedDevice.azureADDeviceId` (Intune). Un appareil reimage/re-enrole peut obtenir un nouvel objet Entra ID cote Intune sans que le champ deprecie cote Autopilot soit necessairement rafraichi par Microsoft, ce qui produirait une divergence reelle mais non anormale. Non confirme ni infirme sans tenant reel ; a verifier en priorite lors de la premiere validation (voir DECISIONS.md).
 
+## Limitations Phase 5 (Entra ID)
+
+- La recherche par `displayName` est une egalite exacte (`eq`), pas une recherche partielle : `contains` n'est pas documente comme supporte sur cette propriete pour la ressource `device`. Un nom saisi partiellement ou avec une casse differente ne trouvera rien ; repli automatique sur la recherche Intune (`contains(deviceName, ...)`) qui, elle, est une recherche partielle.
+- Aucune fonction `tolower()` n'est appliquee sur les filtres `devices` (contrairement a `managedDevices`, D016) : non confirme sans risque sur cette ressource, a valider sur tenant reel avant d'envisager de l'ajouter.
+- `alternativeSecurityIds` et `physicalIds` ne sont deliberement jamais lus ni affiches (documentes "for internal use only" par Microsoft, sans valeur diagnostique confirmee).
+- La correlation Autopilot depuis la page Entra ID est une correlation legere (identite de base uniquement, via `AutopilotInspectorService.search_devices`) : elle n'appelle jamais l'endpoint beta du profil de deploiement, pour ne pas dupliquer un appel beta non demande par cette page. Pour voir le profil complet, utiliser la page Autopilot.
+- Si plusieurs enregistrements Autopilot partagent le meme numero de serie resolu depuis Intune, la correlation Autopilot de la page Entra reste `None` (pas de choix arbitraire) sans lever d'issue dediee - deja couvert par les regles de Phase 4 si l'utilisateur va verifier directement sur la page Autopilot.
+
 ## Validation tenant reel
 
-**Statut : non effectuee.** Aucune App Registration n'a encore ete creee cote tenant (au 2026-09-14). Toute la Phase 4 a ete validee uniquement via `tests/test_autopilot.py` et `tests/test_autopilot_support_bundle.py` (client Graph factice) plus une revue statique du code (echappement OData, capture d'erreur generique 4xx/429, chemins de repli beta). Rien ci-dessus n'a ete confirme contre un vrai tenant Microsoft. A refaire des qu'une App Registration avec les 3 permissions et l'Admin Consent est disponible.
+**Statut : non effectuee (Phase 4 et Phase 5).** Aucune App Registration n'a encore ete creee cote tenant (au 2026-09-14). Toute la Phase 4 et la Phase 5 ont ete validees uniquement via des clients Graph factices (`tests/test_autopilot*.py`, `tests/test_entra*.py`) plus une revue statique du code (echappement OData, capture d'erreur generique 4xx/429/5xx, chemins de repli). Rien ci-dessus n'a ete confirme contre un vrai tenant Microsoft. A refaire des qu'une App Registration avec les 3 permissions (`DeviceManagementManagedDevices.Read.All`, `Device.Read.All`, `DeviceManagementServiceConfig.Read.All`) et l'Admin Consent est disponible. Voir `NEXT.md`.
 
 ## Admin Consent
 

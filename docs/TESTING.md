@@ -138,10 +138,33 @@ Support Bundle Autopilot (`tests/test_autopilot_support_bundle.py`) :
 - nom de fichier `EndpointToolbox-Autopilot-{serial}-{timestamp}.zip` ;
 - export non destructif.
 
+Entra ID (`tests/test_entra.py`) :
+
+- recherche par Object ID Entra, par `deviceId`, par `displayName` (unique et ambigu), echec (aucun resultat) ;
+- recherche par Managed Device ID Intune et par numero de serie (bascule via `IntuneDeviceInspectorService.search_devices` reutilise) ;
+- echappement OData des apostrophes dans un `displayName` ;
+- inspection complete (Entra + Intune + Autopilot tous presents), capacites `AVAILABLE` ;
+- `accountEnabled` true / false / `None` (UNKNOWN != FALSE) ;
+- `isManaged` true sans correlation Intune (issue), `isManaged` `None` ou `false` sans correlation Intune (aucune issue) ;
+- correlation Intune presente, absente (0 resultat confirme, pas une erreur), ambigue (plusieurs matches, aucun choix arbitraire) ;
+- correlation Autopilot presente, absente (non enregistre), non tentee (pas de serial Intune disponible) ;
+- panne partielle Intune 401/403/429/5xx et Autopilot 403 sans casser l'inspection Entra ;
+- 403 direct sur l'objet Entra lui-meme : propage (erreur primaire, pas une panne partielle) ;
+- `critical_data_unavailable` quand Intune et Autopilot echouent tous les deux ;
+- connexion recente non signalee comme stale, connexion ancienne signalee stale (90 jours), date de connexion nulle geree sans crash.
+
+Support Bundle Entra (`tests/test_entra_support_bundle.py`) :
+
+- sanitisation du payload (secrets/tokens absents, y compris depuis le raw JSON Entra) ;
+- sections attendues presentes ;
+- nom de fichier `EndpointToolbox-Entra-{nom}-{timestamp}.zip` ;
+- export non destructif.
+
 ## Gaps connus
 
 - Pas encore de tests UI automatises : le build PySide6 local ne fournit pas de plugin platform `offscreen` ou `minimal`.
 - Pas encore de validation Windows Credential Manager automatisee.
-- Pas encore de tests contre un tenant de sandbox reel (Intune, Entra ID et Autopilot). Aucune App Registration n'existe encore cote tenant au 2026-09-14 ; toute la couverture Phase 1 a 4 repose sur des transports/clients Graph factices.
-- Pas encore de tests UI automatises pour Refresh et tabs Device Inspector / Autopilot ; la logique sous-jacente est couverte par tests metier mockes.
+- Pas encore de tests contre un tenant de sandbox reel (Intune, Entra ID et Autopilot). Aucune App Registration n'existe encore cote tenant au 2026-09-14 ; toute la couverture Phase 1 a 5 repose sur des transports/clients Graph factices.
+- Pas encore de tests UI automatises pour Refresh et tabs Device Inspector / Autopilot / Entra ID ; la logique sous-jacente est couverte par tests metier mockes.
 - Autopilot specifiquement non valide contre un vrai tenant : recherche multi-identifiant, `contains(serialNumber, ...)` avec des serials reels, appel beta du profil, et surtout le risque de faux positif documente sur `identifier_mismatch` (voir `docs/GRAPH_PERMISSIONS.md`, section Validation tenant reel).
+- Entra ID specifiquement non valide contre un vrai tenant : recherche par `displayName` (egalite exacte - comportement reel non confirme), `deviceId eq` sur devices, et la definition du seuil "stale" a 90 jours (jamais confrontee a des dates de connexion reelles).

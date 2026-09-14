@@ -46,8 +46,12 @@ Ne jamais committer Tenant ID, Client ID reel ou Client Secret.
 - `app/autopilot/models.py` : objets Autopilot ; reutilise `ManagedDevice`/`EntraDevice`/`DeviceIssue`/`SourceStatus`/`Capability` de `app.intune.models`.
 - `app/autopilot/health.py` : parsers et regles deterministes Autopilot Health.
 - `app/autopilot/support_bundle.py` : export Support Bundle Autopilot.
-- `app/graph/factory.py` : `build_intune_device_inspector` et `build_autopilot_inspector`.
-- `app/ui/main_window.py` : pages Settings, Intune, Autopilot et Deployment Tools.
+- `app/entra/inspector.py` : recherche et inspection Entra ID read-only (`EntraInspectorService`), compose Intune et Autopilot plutot que de dupliquer leur logique.
+- `app/entra/models.py` : objets Entra ID ; reutilise `ManagedDevice`/`DeviceIssue`/`SourceStatus`/`Capability` de `app.intune.models` et `AutopilotSearchResult` de `app.autopilot.models`.
+- `app/entra/health.py` : parsers et regles deterministes Entra Health.
+- `app/entra/support_bundle.py` : export Support Bundle Entra.
+- `app/graph/factory.py` : `build_intune_device_inspector`, `build_autopilot_inspector` et `build_entra_inspector`.
+- `app/ui/main_window.py` : pages Settings, Intune, Autopilot, Entra ID et Deployment Tools.
 - `app/ui/components.py` : cards, status badges, search boxes, collapsible sections et composants communs.
 - `app/ui/styles.py` : QSS centralisee pour le langage visuel.
 
@@ -73,7 +77,7 @@ Ne jamais committer Tenant ID, Client ID reel ou Client Secret.
 - Application Install Status ;
 - Troubleshoot Device.
 
-Autopilot Troubleshooter (Phase 4) est livre ; les extensions restantes (Fleet Health, Autopilot Import, Device Compare) restent hors perimetre tant qu'elles ne sont pas explicitement demandees.
+Autopilot Troubleshooter (Phase 4) et Entra ID Inspector (Phase 5, devices) sont livres ; les extensions restantes (Fleet Health, Autopilot Import, Device Compare, Entra User/Group Inspector, Conditional Access) restent hors perimetre tant qu'elles ne sont pas explicitement demandees.
 
 Ne pas coupler les futures fonctionnalites a une seule reponse brute Graph.
 
@@ -95,3 +99,12 @@ Pour ajouter une fonctionnalite Autopilot (ex. Autopilot Import en ecriture dans
 2. Toute nouvelle action d'ecriture reste hors du `GraphReadOnlyClient` existant (qui bloque POST/PATCH/PUT/DELETE par construction) : elle necessiterait un client distinct, une decision explicite documentee dans `docs/DECISIONS.md`, et l'accord de l'utilisateur avant implementation.
 3. Reutiliser `app.intune.models` / `app.intune.device_inspector` / `app.intune.health` plutot que dupliquer (voir D019).
 4. Toute regle Autopilot Health doit respecter UNKNOWN != FALSE et vivre dans `app/autopilot/health.py`, jamais dans l'UI.
+
+## Reprendre le module Entra ID
+
+Pour etendre l'inspection Entra ID (ex. Entra User Inspector dans une phase future) :
+
+1. Lire `docs/GRAPH_ENDPOINTS.md` avant tout nouvel endpoint. Phase 5 (devices) est entierement v1.0 ; un elargissement vers users/groups introduit de nouvelles permissions (`User.Read.All`, `Group.Read.All`, ...) qui doivent etre documentees et validees explicitement avant implementation, jamais ajoutees par defaut.
+2. Reutiliser `app.intune.models` / `app.autopilot.models` / `app.entra.models` plutot que dupliquer (voir D019, D024-D027).
+3. Toute regle Entra Health doit respecter UNKNOWN != FALSE, avoir une justification metier individuelle (pas de quota arbitraire de regles), et vivre dans `app/entra/health.py`, jamais dans l'UI.
+4. Avant d'ajouter une regle comparant deux champs de sources differentes (ex. type "mismatch"), evaluer d'abord si un delai de synchronisation normal entre les sources peut produire un faux positif attendu (voir D026) ; si oui, ne pas ajouter la regle sans discussion explicite.

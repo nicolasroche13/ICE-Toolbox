@@ -72,6 +72,29 @@ Volontairement non lu : la relation `assignments` (groupes cibles) de `windowsAu
 
 Aucun endpoint Autopilot dedie n'est utilise pour la correlation : Endpoint Toolbox reutilise directement les endpoints Intune et Entra deja documentes ci-dessus, a partir des identifiants fiables renvoyes par l'identite Autopilot (`managedDeviceId`, `azureActiveDirectoryDeviceId`) ou par le managedDevice Intune (`azureADDeviceId`).
 
+## Entra ID - devices (detail complet, Phase 5)
+
+| Point | Detail |
+| --- | --- |
+| Endpoint | `GET /devices/{id}` (objet par Object ID), `GET /devices` avec `$filter` (recherche par `deviceId` ou `displayName`) |
+| Version | **v1.0** pour l'integralite des proprietes utilisees. Aucun appel beta dans ce module. |
+| Proprietes utilisees (`$select`) | `id, deviceId, displayName, accountEnabled, operatingSystem, operatingSystemVersion, trustType, profileType, deviceOwnership, enrollmentType, managementType, isCompliant, isManaged, isRooted, onPremisesSyncEnabled, registrationDateTime, approximateLastSignInDateTime, onPremisesLastSyncDateTime, complianceExpirationDateTime`. Toutes confirmees v1.0 via la documentation Microsoft Learn (`device` resource type) au 2026-09-14. |
+| Deliberement non selectionne | `alternativeSecurityIds` et `physicalIds` : documentes "For internal use only" par Microsoft, aucune valeur diagnostique confirmee ; ne pas les exposer inutilement (voir D024). |
+| Filtres utilises | `deviceId eq '{guid}'` (identique au pattern deja utilise par Phase 3.1/4) ; `displayName eq '{valeur}'` (egalite exacte, pas `contains`/`startsWith`). |
+| Limitation connue | `displayName` supporte documentairement `eq, ne, not, ge, le, in, startsWith` et `$search`, mais **pas** `contains`. Une recherche par nom est donc une correspondance exacte, pas une recherche partielle - deliberement plus strict que la recherche Intune (`contains`) mais toujours deterministe. Aucune fonction `tolower()` n'est ajoutee : contrairement a `managedDevices` (D016), la prise en charge de `tolower()` sur la ressource `device` n'est pas confirmee et n'a pas ete testee sur tenant reel. |
+| Alternate key non utilisee | `GET /devices(deviceId='{deviceId}')` existe et retourne un objet unique, mais n'est pas utilise : il ne permettrait pas de detecter une ambiguite (plusieurs devices partageant le meme `deviceId`) de la meme maniere que `$filter=deviceId eq '...'&$top=2`, qui est le pattern deja retenu en Phase 3.1/4. |
+| Pagination | `@odata.nextLink` standard. |
+| Permission | `Device.Read.All` (Application, deja documentee et utilisee depuis Phase 3). **Aucune permission supplementaire requise pour Phase 5.** |
+| Admin consent | Deja accorde si Phase 3/4 fonctionnent. |
+| Source officielle | https://learn.microsoft.com/en-us/graph/api/resources/device?view=graph-rest-1.0 et https://learn.microsoft.com/en-us/graph/api/device-get?view=graph-rest-1.0 |
+
+## Entra ID - correlation Intune / Autopilot (Phase 5)
+
+Depuis un device Entra ID resolu, la correlation reutilise les endpoints deja documentes :
+
+- Intune : `GET /deviceManagement/managedDevices?$filter=azureADDeviceId eq '{deviceId}'` (meme pattern que la correlation Autopilot -> Intune de Phase 4). Un resultat vide (200, 0 objet) est traite comme "correlation non trouvee", jamais comme une erreur.
+- Autopilot : reutilise directement `AutopilotInspectorService.search_devices(serial)` (le serial provenant du managedDevice Intune deja correle) plutot que de dupliquer la logique `contains(serialNumber, ...)` - voir D025. N'appelle jamais l'endpoint beta du profil Autopilot (`$expand=deploymentProfile`) : la page Entra affiche uniquement l'identite Autopilot de base, pas le profil, pour eviter un appel beta additionnel non demande par cette page.
+
 ## Recapitulatif v1.0 / beta
 
 | Endpoint | Version |
@@ -82,4 +105,4 @@ Aucun endpoint Autopilot dedie n'est utilise pour la correlation : Endpoint Tool
 | windowsAutopilotDeviceIdentities (liste, get) | v1.0 |
 | windowsAutopilotDeviceIdentities?$expand=deploymentProfile | beta (isole) |
 
-v1.0 reste prioritaire pour toute nouvelle fonctionnalite. Un appel beta doit rester isole, optionnel, documente ici, et avec repli propre - jamais une dependance silencieuse.
+v1.0 reste prioritaire pour toute nouvelle fonctionnalite. Un appel beta doit rester isole, optionnel, documente ici, et avec repli propre - jamais une dependance silencieuse. **Phase 5 (Entra ID) n'introduit aucun nouvel appel beta** : toutes les proprietes demandees existent en v1.0.

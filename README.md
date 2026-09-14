@@ -2,7 +2,7 @@
 
 Endpoint Toolbox est une application desktop Python/PySide6 pour les ingenieurs Endpoint et Microsoft 365.
 
-La Phase 2 ajoute une fondation Microsoft Graph strictement read-only et un premier outil Intune Device Inspector. La Phase 2.5 refond l'UX autour d'une interface plus simple, Figma-inspired, avec disclosure progressif. La Phase 3 transforme l'inspection en Device Health read-only multi-source. La Phase 4 ajoute un Autopilot Troubleshooter read-only.
+La Phase 2 ajoute une fondation Microsoft Graph strictement read-only et un premier outil Intune Device Inspector. La Phase 2.5 refond l'UX autour d'une interface plus simple, Figma-inspired, avec disclosure progressif. La Phase 3 transforme l'inspection en Device Health read-only multi-source. La Phase 4 ajoute un Autopilot Troubleshooter read-only. La Phase 5 ajoute un Entra ID Inspector (devices) read-only.
 
 ## Perimetre actuel
 
@@ -13,9 +13,10 @@ La Phase 2 ajoute une fondation Microsoft Graph strictement read-only et un prem
 - Intune : recherche de managed devices et Device Inspector read-only.
 - Device Health : correlation Intune / Entra ID, issues deterministes, compliance device-level, applications device-level, raw data multi-source.
 - Autopilot Troubleshooter : recherche par numero de serie (et autres identifiants), correlation Autopilot -> Profil -> Entra ID -> Intune, chaine visuelle, issues deterministes, Support Bundle dedie.
+- Entra ID Inspector : recherche par Object ID, deviceId, displayName, numero de serie ou Managed Device ID, correlation Entra -> Intune -> Autopilot, chaine visuelle, issues deterministes, Support Bundle dedie. Aucun appel beta.
 - Graph : OAuth2 client credentials, token cache, GET uniquement, pagination, retry 429, erreurs lisibles.
 - Secrets : Client Secret stocke dans le keychain systeme via `keyring`, jamais dans le JSON local.
-- UX Phase 2.5 : sidebar sombre, header Graph, Home orientee quick tools, Deployment Tools en parcours Source / Configuration / Preview / Export, Intune et Autopilot exception-first.
+- UX Phase 2.5 : sidebar sombre, header Graph, Home orientee quick tools, Deployment Tools en parcours Source / Configuration / Preview / Export, Intune/Autopilot/Entra ID exception-first.
 
 ## Installation
 
@@ -42,7 +43,7 @@ python main.py
 1. Creer une App Registration dans Microsoft Entra ID.
 2. Noter le Tenant ID et le Client ID.
 3. Creer un Client Secret.
-4. Ajouter les permissions Microsoft Graph Application documentees dans `docs/GRAPH_PERMISSIONS.md`.
+4. Ajouter les 3 permissions Microsoft Graph Application documentees dans `docs/GRAPH_PERMISSIONS.md` (`DeviceManagementManagedDevices.Read.All`, `Device.Read.All`, `DeviceManagementServiceConfig.Read.All`).
 5. Accorder l'Admin Consent.
 6. Ouvrir Endpoint Toolbox > Settings.
 7. Saisir Tenant ID, Client ID et Client Secret.
@@ -76,6 +77,19 @@ Workflow :
 6. Utiliser Actualiser pour relire Microsoft Graph, sans declencher de synchronisation Autopilot ou Intune.
 
 Endpoint Toolbox n'execute aucune action Autopilot : pas d'import, modification de Group Tag, suppression, assignation de profil ou synchronisation.
+
+## Entra ID Inspector
+
+Workflow :
+
+1. Aller dans Entra ID.
+2. Rechercher un appareil par Object ID, Device ID, nom d'appareil (displayName), numero de serie ou Managed Device ID Intune.
+3. Selectionner un resultat.
+4. Lire la carte de synthese, la chaine Entra ID -> Intune -> Autopilot -> Conformite, puis les problemes detectes.
+5. Consulter Vue d'ensemble, Entra ID, Intune, Autopilot, Donnees brutes et Diagnostics.
+6. Utiliser Actualiser pour relire Microsoft Graph, sans declencher d'action sur Entra ID, Intune ou Autopilot.
+
+Endpoint Toolbox n'execute aucune action Entra ID : pas d'activation/desactivation, suppression de device, ni gestion d'utilisateurs, de groupes ou de Conditional Access.
 
 ## Tests
 

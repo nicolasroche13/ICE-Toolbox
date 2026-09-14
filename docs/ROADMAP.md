@@ -80,7 +80,21 @@ Statut : implemente (tests mockes uniquement). **Validation contre un tenant Mic
 - Fleet Health (vue agregee multi-device).
 - Analyse de deploiement.
 
-## Phase 5 - Entra ID read-only
+## Phase 5 - Entra ID Inspector (devices) read-only
+
+Statut : implemente (tests mockes uniquement). **Validation contre un tenant Microsoft reel non effectuee** : aucune App Registration n'existe encore cote tenant au 2026-09-14 (meme situation que Phase 4). Voir `docs/GRAPH_PERMISSIONS.md` (section Validation tenant reel) et `NEXT.md`.
+
+- Module `app/entra/` (models, health, inspector, support_bundle), meme architecture que Device Health et Autopilot ; compose `IntuneDeviceInspectorService` et `AutopilotInspectorService` plutot que de dupliquer leur logique de recherche.
+- Recherche par Object ID Entra, `deviceId`, `displayName` (egalite exacte), numero de serie et Managed Device ID Intune (via correlation), toujours sans selection arbitraire en cas d'ambiguite.
+- Identite Entra ID complete en v1.0 uniquement (accountEnabled, isCompliant, isManaged, isRooted, trustType, profileType, deviceOwnership, enrollmentType, managementType, dates) - **aucun appel beta**.
+- 5 regles Entra Health deterministes et individuellement justifiees (`entra_device_disabled`, `entra_device_stale`, `managed_without_intune_correlation`, `correlation_ambiguous`, `critical_data_unavailable`) ; UNKNOWN != FALSE verifie par tests ; regle `os_version_mismatch` deliberement ecartee (risque de faux positif connu des la conception, D026).
+- Definition de "stale" Entra (90 jours, `approximateLastSignInDateTime`) explicitement distincte du seuil Intune (7 jours, `lastSyncDateTime`).
+- Trois capacites supplementaires sur le modele a six etats existant.
+- Page Entra ID complete : synthese immediate, chaine visuelle Entra -> Intune -> Autopilot -> Conformite, sections Vue d'ensemble/Entra ID/Intune/Autopilot/Donnees brutes/Diagnostics, Support Bundle dedie, Refresh asynchrone.
+- Aucune permission Graph supplementaire : reutilise `Device.Read.All` deja documente depuis Phase 3.
+- 35 tests dedies (recherche, correlation, panne partielle 401/403/404/429/5xx, stale, sanitisation du support bundle).
+
+## Phase 6 - Entra ID au-dela de l'inspection device (hors perimetre actuel)
 
 - User Inspector.
 - Group Inspector.

@@ -129,3 +129,27 @@ Raison : `windowsAutopilotDeviceIdentities` ne supporte fiablement que `contains
 Decision : lorsque la recherche resout un appareil via Intune ou Entra mais qu'aucun enregistrement Autopilot ne correspond a son numero de serie, `search_devices` renvoie tout de meme un `AutopilotSearchResult` avec `id=""`, et `inspect_device` construit un `AutopilotDeviceHealth` avec une identite vide plutot que d'echouer.
 
 Raison : "savoir si un appareil est enregistre dans Autopilot" fait partie de la definition de fait de ce module (item 3, Phase 4). Sans cette decision, l'absence de resultat Autopilot serait indiscernable d'une recherche qui n'a simplement rien trouve.
+
+## D024 - alternativeSecurityIds et physicalIds jamais lus
+
+Decision : `app/entra/inspector.py` ne selectionne jamais `alternativeSecurityIds` ni `physicalIds` sur la ressource `device`, et `EntraDeviceDetail` ne les modelise pas.
+
+Raison : Microsoft documente ces deux proprietes comme "For internal use only" sur la ressource `device` v1.0. Aucune valeur diagnostique n'a ete identifiee pour le troubleshooting device, et les exposer (y compris dans Raw Data) serait une exposition sans benefice demontre. Coherent avec la consigne Phase 5 de ne les inclure que si "reellement utile" - ce n'est pas le cas ici.
+
+## D025 - Correlation Autopilot depuis Entra reutilise search_devices, jamais l'appel beta
+
+Decision : la correlation Autopilot de `EntraInspectorService.inspect_device` appelle `AutopilotInspectorService.search_devices(serial)` (identite Autopilot de base uniquement) et n'appelle jamais `inspect_device` d'Autopilot, donc jamais l'endpoint beta `$expand=deploymentProfile`.
+
+Raison : la page Entra ID doit rester centree sur Entra ID et afficher une correlation utile sans dupliquer toute la page Autopilot (consigne UI explicite). Appeler le profil beta depuis la page Entra aurait ajoute un appel Graph (et une dependance beta) non demande par cette page ; l'utilisateur qui a besoin du profil peut ouvrir la page Autopilot directement.
+
+## D026 - Pas de regle "os_version_mismatch" entre Entra et Intune
+
+Decision : Endpoint Toolbox n'implemente pas de regle Health comparant `device.operatingSystemVersion` (Entra) et `managedDevice.osVersion` (Intune), contrairement a `identifier_mismatch` (Phase 4) qui compare des identifiants.
+
+Raison : Entra ID et Intune synchronisent leurs proprietes a des rythmes independants ; une difference de version OS entre les deux est un artefact courant et attendu du delai de synchronisation, pas un signal fiable d'anomalie. Contrairement a `identifier_mismatch` (ou le risque de faux positif n'a ete identifie qu'apres coup, voir Limitations Phase 4), ce risque etait connu des la conception de Phase 5 ; la consigne explicite ("eviter les faux positifs connus") justifie de ne pas creer cette regle plutot que de la creer puis la corriger. Les deux valeurs restent visibles cote a cote en Raw Data/Diagnostics.
+
+## D027 - Seuil de staleness Entra distinct du seuil Intune
+
+Decision : `entra_device_stale` utilise une constante dediee `ENTRA_STALE_SIGN_IN_DAYS = 90` dans `app/entra/health.py`, non liee au reglage "Seuil stale device" des Settings (qui reste specifique a `managedDevice.lastSyncDateTime`, Intune).
+
+Raison : `approximateLastSignInDateTime` (Entra, activite de connexion interactive) et `lastSyncDateTime` (Intune, cycle de check-in MDM ~8h automatique) mesurent des activites de nature differente et ne progressent pas au meme rythme. Reutiliser le seuil de 7 jours deja configure pour Intune aurait produit un volume important de faux "stale" sur des appareils actifs mais sans reconnexion interactive recente. 90 jours correspond a l'ordre de grandeur communement cite par Microsoft pour le nettoyage des appareils Entra ID inactifs.

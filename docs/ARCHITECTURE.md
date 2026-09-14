@@ -21,9 +21,9 @@ Endpoint Toolbox est une application desktop locale pour preparer, inspecter et 
 - `app/graph` : configuration, secret store, OAuth2, client GET-only, erreurs et transport HTTP.
 - `app/intune` : services et modeles metier Intune read-only.
 - `app/autopilot` : services et modeles metier Autopilot Troubleshooter read-only (Phase 4).
+- `app/entra` : services et modeles metier Entra ID Inspector read-only (Phase 5).
 - `app/ui/components.py` : composants visuels reutilisables.
 - `app/ui/styles.py` : feuille de style centralisee et design tokens pratiques.
-- `app/entra` : placeholder pour phase ulterieure (Entra ID read-only complet).
 - `tests` : tests pytest sans tenant Microsoft reel.
 
 ## Graph read-only
@@ -153,3 +153,44 @@ Un appareil resolu via Intune mais absent d'Autopilot est renvoye comme resultat
 ### Capacites Autopilot
 
 Cinq capacites ajoutees au meme modele a six etats : `Autopilot Identity`, `Enrollment Information` (meme source que l'identite), `Autopilot Profile` (beta, isole), `Intune Correlation`, `Entra Correlation`.
+
+## Entra ID Inspector (Phase 5)
+
+Module dedie `app/entra/` :
+
+- `app/entra/models.py` : `EntraDeviceDetail`, `EntraSearchResult`, `EntraDeviceHealth`, `EntraInspectorResult`. Reutilise `ManagedDevice`, `DeviceIssue`, `SourceStatus`, `Capability`, `HealthStatus` de `app.intune.models` et `AutopilotSearchResult` de `app.autopilot.models` plutot que de dupliquer ces types (meme principe que D019).
+- `app/entra/health.py` : `parse_entra_device_detail`, `generate_entra_issues` (5 regles deterministes, memes principes que `app/intune/health.py` et `app/autopilot/health.py`).
+- `app/entra/inspector.py` : `EntraInspectorService`, seul point d'appel Graph direct du module. Compose `IntuneDeviceInspectorService` et `AutopilotInspectorService` (memes instances, meme `GraphReadOnlyClient` partage) pour reutiliser leurs mecanismes de recherche existants plutot que de les reimplementer. Reutilise `MANAGED_DEVICE_SELECT`, `parse_managed_device` et `_with_source` de `app.intune.device_inspector`.
+- `app/entra/support_bundle.py` : export zip dedie, reutilise `sanitize_for_export` et `non_overwriting_path`.
+- `app/graph/factory.py` expose `build_entra_inspector`, qui construit et partage un `GraphReadOnlyClient` unique entre les trois services (Intune, Autopilot, Entra) pour eviter toute authentification redondante.
+- `EntraPage` (`app/ui/main_window.py`) ne contient aucune logique Graph : elle appelle uniquement `EntraInspectorService`.
+
+### Endpoints Graph Entra ID
+
+Voir `docs/GRAPH_ENDPOINTS.md` pour le detail complet. Resume : **tout le module reste en v1.0**, aucun appel beta. `GET /devices/{id}` (Object ID direct), `GET /devices?$filter=...` (recherche par `deviceId` ou `displayName`, egalite exacte). Permission `Device.Read.All`, deja documentee et utilisee depuis Phase 3 - aucune permission supplementaire.
+
+### Recherche Entra ID
+
+`EntraInspectorService.search_devices` accepte l'Object ID Entra, le `deviceId` Entra, le `displayName` (egalite exacte), le numero de serie (via correlation Intune) et le Managed Device ID Intune (via correlation) :
+
+1. GUID : tentative directe comme Object ID, puis comme `deviceId` (filtre, ambiguite geree comme pour Autopilot/Intune), puis comme Managed Device ID Intune (bascule via son `azureADDeviceId` vers `deviceId`).
+2. Non-GUID : recherche directe par `displayName eq '...'`, puis repli sur `IntuneDeviceInspectorService.search_devices` (reutilisation directe, pas de reimplementation) dont chaque `azureADDeviceId` resultant est ensuite verifie sur Entra ID.
+
+Aucune selection n'est jamais automatique en cas d'ambiguite : tous les resultats plausibles sont renvoyes pour selection manuelle.
+
+### Correlation depuis un device Entra ID
+
+- Intune : `GET managedDevices?$filter=azureADDeviceId eq '{deviceId}'`. Un resultat vide (200, 0 objet) est une correlation "non trouvee" confirmee ; un `>1` est une ambiguite (`correlation_ambiguous`) ; toute erreur Graph (401/403/404/429/5xx) est une correlation "inconnue" (capacite `PERMISSION_MISSING`/`API_UNAVAILABLE`/`ERROR`, jamais traitee comme confirmation d'absence).
+- Autopilot : uniquement si la correlation Intune a reussi et fournit un numero de serie. Reutilise `AutopilotInspectorService.search_devices(serial)` (identite legere uniquement, jamais l'appel beta du profil) pour eviter de dupliquer la logique de recherche Autopilot ou d'ajouter un appel beta non necessaire a cette page.
+
+### Issues Entra ID
+
+`app/entra/health.py` genere volontairement **5 regles** (pas plus, chacune justifiee individuellement plutot qu'un nombre arbitraire) : `entra_device_disabled`, `entra_device_stale`, `managed_without_intune_correlation`, `correlation_ambiguous`, `critical_data_unavailable`. Toutes respectent UNKNOWN != FALSE : `accountEnabled`/`isManaged` absents (`None`) ne generent jamais d'issue, seule une valeur confirmee le fait.
+
+Une regle `os_version_mismatch` (Entra `operatingSystemVersion` vs Intune `osVersion`) a ete deliberement **ecartee** : la divergence entre ces deux champs est un artefact frequent et attendu du delai de synchronisation entre Entra ID et Intune, pas necessairement une anomalie - l'ajouter aurait cree un risque de faux positif connu des la conception (voir D026). Les deux valeurs restent visibles cote a cote dans Raw Data / Diagnostics pour un examen manuel.
+
+**Definition precise de "stale" (Entra)** : `entra_device_stale` se declenche lorsque `approximateLastSignInDateTime` depasse `ENTRA_STALE_SIGN_IN_DAYS` (90 jours, constante dans `app/entra/health.py`, non partagee avec le reglage "Seuil stale device" des Settings). Cette date mesure l'activite de connexion interactive Entra ID, **pas** le dernier check-in MDM Intune (`managedDevice.lastSyncDateTime`, cycle ~8h independant de l'activite utilisateur) : les deux ne doivent jamais etre confondues, et un seuil de 7 jours (pertinent pour Intune) generait un volume de faux positifs important si applique aux connexions Entra.
+
+### Capacites Entra ID
+
+Trois capacites sur le meme modele a six etats : `Entra Device`, `Intune Correlation`, `Autopilot Correlation`.
