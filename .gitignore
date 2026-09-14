@@ -3,11 +3,15 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .DS_Store
-dist/
-build/
-*.spec
 exports/
 config/local.json
+
+# PyInstaller build output (never commit the frozen executable itself).
+# packaging/windows/EndpointToolbox.spec IS tracked on purpose - only the
+# generated build/ and dist/ directories and loose executables are ignored.
+build/
+dist/
+*.exe
 
 # Python
 .venv/

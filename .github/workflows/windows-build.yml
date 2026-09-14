@@ -1,0 +1,42 @@
+name: Windows portable build (manual)
+
+# Manual only: this workflow never runs on push/PR. It builds the Windows
+# portable EndpointToolbox.exe on a GitHub-hosted windows-latest runner and
+# uploads it as a build artifact - it never talks to Microsoft Graph and never
+# publishes a GitHub Release. No Tenant ID, Client ID or Client Secret exists
+# anywhere in this workflow or the repository it checks out.
+on:
+  workflow_dispatch: {}
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-build.txt
+
+      - name: Run test suite
+        run: python -m pytest -q
+
+      - name: Byte-compile source tree
+        run: python -m compileall main.py app -q
+
+      - name: Build with PyInstaller
+        run: pyinstaller --noconfirm --clean packaging/windows/EndpointToolbox.spec
+
+      - name: Upload EndpointToolbox.exe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EndpointToolbox-windows
+          path: dist/EndpointToolbox.exe
+          if-no-files-found: error

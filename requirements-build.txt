@@ -1,0 +1,9 @@
+# Build-only dependencies for the Windows portable package (Phase 7).
+# Not needed to run Endpoint Toolbox from source - install alongside
+# requirements.txt only when producing EndpointToolbox.exe.
+#
+# pyinstaller-hooks-contrib supplies community-maintained PyInstaller hooks for
+# pandas/openpyxl/numpy (all transitively required here) so their hidden
+# imports and data files are collected automatically.
+pyinstaller>=6.10,<7
+pyinstaller-hooks-contrib>=2024.9
