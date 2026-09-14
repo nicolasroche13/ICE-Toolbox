@@ -91,6 +91,7 @@ Avec le virtualenv local :
 
 ## Documentation
 
+- `NEXT.md` : prochaine etape exacte pour reprendre le projet.
 - `docs/ARCHITECTURE.md` : structure applicative et responsabilites.
 - `docs/DECISIONS.md` : decisions produit et techniques.
 - `docs/FEATURES.md` : fonctionnalites livrees et backlog.
