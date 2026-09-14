@@ -9,6 +9,7 @@ from app.graph.errors import GraphConfigurationError
 from app.graph.models import GraphSettings
 from app.graph.secrets import GraphSecretStore
 from app.intune.device_inspector import IntuneDeviceInspectorService
+from app.workspace.service import DeviceWorkspaceService
 
 
 def _resolve_auth(
@@ -50,3 +51,15 @@ def build_entra_inspector(
     intune_service = IntuneDeviceInspectorService(client, stale_device_days=settings.stale_device_days)
     autopilot_service = AutopilotInspectorService(client, stale_device_days=settings.stale_device_days)
     return EntraInspectorService(client, intune_service, autopilot_service, stale_device_days=settings.stale_device_days)
+
+
+def build_device_workspace(
+    config_store: GraphConfigStore | None = None,
+    secret_store: GraphSecretStore | None = None,
+) -> DeviceWorkspaceService:
+    auth, settings = _resolve_auth(config_store, secret_store)
+    client = GraphReadOnlyClient(auth)
+    intune_service = IntuneDeviceInspectorService(client, stale_device_days=settings.stale_device_days)
+    autopilot_service = AutopilotInspectorService(client, stale_device_days=settings.stale_device_days)
+    entra_service = EntraInspectorService(client, intune_service, autopilot_service, stale_device_days=settings.stale_device_days)
+    return DeviceWorkspaceService(intune_service, autopilot_service, entra_service)
