@@ -66,7 +66,7 @@ from app.graph.auth import ClientCredentialsAuth
 from app.graph.client import GraphReadOnlyClient
 from app.graph.config import GraphConfigStore
 from app.graph.errors import GraphError, SecureStorageUnavailable
-from app.graph.factory import build_autopilot_inspector, build_entra_inspector, build_intune_device_inspector
+from app.graph.factory import build_autopilot_inspector, build_device_workspace, build_entra_inspector, build_intune_device_inspector
 from app.graph.models import GraphRequestLog, GraphSettings
 from app.graph.secrets import GraphSecretStore
 from app.intune.device_inspector import IntuneDeviceInspectorService
@@ -90,6 +90,9 @@ from app.ui.components import (
 )
 from app.ui.styles import APP_STYLESHEET
 from app.utils.time import relative_datetime
+from app.workspace.models import DeviceWorkspaceResult, WorkspaceSearchResult
+from app.workspace.service import DeviceWorkspaceService
+from app.workspace.support_bundle import export_workspace_support_bundle
 
 
 class TaskWorker(QObject):
@@ -295,6 +298,7 @@ class HomePage(QWidget):
         grid = QGridLayout()
         grid.setSpacing(14)
         tools = [
+            ("Appareil", "Vue consolidee Autopilot / Entra ID / Intune pour un poste.", "Appareil", None, True),
             ("Repartir en vagues", "Creer des vagues de deploiement egales.", "Outils de deploiement", "simple", True),
             ("Pilote representatif", "Constituer un pilote representatif du parc.", "Outils de deploiement", "pilot", True),
             ("Device Inspector", "Detecter les problemes sur un appareil Intune.", "Intune", None, True),
@@ -943,6 +947,10 @@ class IntunePage(QWidget, AsyncPageMixin):
             self.service = build_intune_device_inspector()
         return self.service
 
+    def open_with_identifier(self, identifier: str) -> None:
+        self.search_input.setText(identifier)
+        self.search_devices()
+
     def search_devices(self) -> None:
         query = self.search_input.text().strip()
         if not query:
@@ -1313,6 +1321,10 @@ class AutopilotPage(QWidget, AsyncPageMixin):
         if self.service is None:
             self.service = build_autopilot_inspector()
         return self.service
+
+    def open_with_identifier(self, identifier: str) -> None:
+        self.search_input.setText(identifier)
+        self.search_devices()
 
     def search_devices(self) -> None:
         query = self.search_input.text().strip()
@@ -1795,6 +1807,10 @@ class EntraPage(QWidget, AsyncPageMixin):
             self.service = build_entra_inspector()
         return self.service
 
+    def open_with_identifier(self, identifier: str) -> None:
+        self.search_input.setText(identifier)
+        self.search_devices()
+
     def search_devices(self) -> None:
         query = self.search_input.text().strip()
         if not query:
@@ -2123,6 +2139,444 @@ class EntraPage(QWidget, AsyncPageMixin):
         self.diagnostics.setPlainText(message)
 
 
+class WorkspacePage(QWidget, AsyncPageMixin):
+    def __init__(self, open_in_module: Callable[[str, str], None]):
+        super().__init__()
+        self.open_in_module = open_in_module
+        self.service: DeviceWorkspaceService | None = None
+        self.search_results: list[WorkspaceSearchResult] = []
+        self.current_result: DeviceWorkspaceResult | None = None
+        self.current_selection: WorkspaceSearchResult | None = None
+        self.thread: QThread | None = None
+        self.worker: TaskWorker | None = None
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(24, 24, 24, 24)
+        root.setSpacing(16)
+        root.addWidget(
+            SectionHeader(
+                "Appareil",
+                "Une seule recherche, une vue consolidee Autopilot / Entra ID / Intune pour le meme poste.",
+            )
+        )
+        search_row = QHBoxLayout()
+        self.search_input = SearchBox(
+            "Numero de serie, nom du poste, Managed Device ID, Entra Object ID, Entra deviceId ou Autopilot Device ID..."
+        )
+        self.search_input.returnPressed.connect(self.search_devices)
+        search = PrimaryButton("Rechercher")
+        search.clicked.connect(self.search_devices)
+        search_row.addWidget(self.search_input, 1)
+        search_row.addWidget(search)
+        root.addLayout(search_row)
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 0)
+        self.progress.hide()
+        root.addWidget(self.progress)
+
+        self.results_card = Card("Resultats")
+        self.results_layout = QVBoxLayout()
+        self.results_layout.setContentsMargins(0, 0, 0, 0)
+        self.results_card.layout.addLayout(self.results_layout)
+        root.addWidget(self.results_card)
+
+        self.device_card = Card()
+        header_row = QHBoxLayout()
+        self.device_header = QLabel("Aucun appareil selectionne")
+        self.device_header.setObjectName("pageTitle")
+        self.refresh_button = SecondaryButton("Actualiser")
+        self.refresh_button.setToolTip("Actualiser les donnees depuis Microsoft Graph")
+        self.refresh_button.clicked.connect(self.refresh_current_device)
+        self.refresh_button.setEnabled(False)
+        header_row.addWidget(self.device_header, 1)
+        header_row.addWidget(self.refresh_button)
+        self.health_summary = QLabel("Recherchez et selectionnez un appareil pour voir sa vue consolidee.")
+        self.health_summary.setObjectName("cardTitle")
+        self.device_badges = QLabel("")
+        self.device_badges.setObjectName("muted")
+        self.chain_container = QWidget()
+        self.chain_layout = QVBoxLayout(self.chain_container)
+        self.chain_layout.setContentsMargins(0, 8, 0, 0)
+        self.device_card.layout.addLayout(header_row)
+        self.device_card.layout.addWidget(self.health_summary)
+        self.device_card.layout.addWidget(self.device_badges)
+        self.device_card.layout.addWidget(self.chain_container)
+        root.addWidget(self.device_card)
+
+        self.issues_card = Card("Points d'attention")
+        self.issues_layout = QVBoxLayout()
+        self.issues_layout.setContentsMargins(0, 0, 0, 0)
+        self.issues_card.layout.addLayout(self.issues_layout)
+        self.issues_layout.addWidget(EmptyState("Aucun appareil selectionne", "Les points d'attention apparaissent ici apres inspection."))
+        root.addWidget(self.issues_card)
+
+        self.identity_card = Card("Identite")
+        self.identity_grid = KeyValueGrid()
+        self.identity_card.layout.addWidget(self.identity_grid)
+        self.identity_conflict_label = QLabel("")
+        self.identity_conflict_label.setObjectName("muted")
+        self.identity_conflict_label.setWordWrap(True)
+        self.identity_conflict_label.hide()
+        self.identity_card.layout.addWidget(self.identity_conflict_label)
+        root.addWidget(self.identity_card)
+
+        blocks_row = QHBoxLayout()
+        blocks_row.setSpacing(14)
+        self.autopilot_block_card = Card("Autopilot")
+        self.autopilot_block_grid = KeyValueGrid()
+        self.autopilot_block_card.layout.addWidget(self.autopilot_block_grid)
+        self.autopilot_open_button = SecondaryButton("Ouvrir dans Autopilot")
+        self.autopilot_open_button.clicked.connect(self._open_autopilot)
+        self.autopilot_open_button.setEnabled(False)
+        self.autopilot_block_card.layout.addWidget(self.autopilot_open_button, 0, Qt.AlignLeft)
+        blocks_row.addWidget(self.autopilot_block_card)
+
+        self.entra_block_card = Card("Entra ID")
+        self.entra_block_grid = KeyValueGrid()
+        self.entra_block_card.layout.addWidget(self.entra_block_grid)
+        self.entra_open_button = SecondaryButton("Ouvrir dans Entra ID")
+        self.entra_open_button.clicked.connect(self._open_entra)
+        self.entra_open_button.setEnabled(False)
+        self.entra_block_card.layout.addWidget(self.entra_open_button, 0, Qt.AlignLeft)
+        blocks_row.addWidget(self.entra_block_card)
+
+        self.intune_block_card = Card("Intune")
+        self.intune_block_grid = KeyValueGrid()
+        self.intune_block_card.layout.addWidget(self.intune_block_grid)
+        self.intune_open_button = SecondaryButton("Ouvrir dans Intune")
+        self.intune_open_button.clicked.connect(self._open_intune)
+        self.intune_open_button.setEnabled(False)
+        self.intune_block_card.layout.addWidget(self.intune_open_button, 0, Qt.AlignLeft)
+        blocks_row.addWidget(self.intune_block_card)
+        root.addLayout(blocks_row)
+
+        self.detail_tabs = QTabWidget()
+        raw_page = QWidget()
+        raw_layout = QVBoxLayout(raw_page)
+        raw_actions = QHBoxLayout()
+        copy = SecondaryButton("Copier")
+        copy.clicked.connect(self.copy_raw_data)
+        copy_endpoint = SecondaryButton("Copier l'endpoint")
+        copy_endpoint.clicked.connect(self.copy_current_endpoint)
+        export = SecondaryButton("Exporter le JSON")
+        export.clicked.connect(self.export_raw_data)
+        export_diagnostics = SecondaryButton("Exporter les diagnostics")
+        export_diagnostics.clicked.connect(self.export_diagnostics_bundle)
+        raw_actions.addWidget(copy)
+        raw_actions.addWidget(copy_endpoint)
+        raw_actions.addWidget(export)
+        raw_actions.addWidget(export_diagnostics)
+        raw_actions.addStretch()
+        self.raw_tabs = QTabWidget()
+        self.raw_editors: dict[str, QPlainTextEdit] = {}
+        raw_layout.addLayout(raw_actions)
+        raw_layout.addWidget(self.raw_tabs)
+        self.diagnostics = QPlainTextEdit()
+        self.diagnostics.setReadOnly(True)
+        self.detail_tabs.addTab(raw_page, "Donnees brutes")
+        self.detail_tabs.addTab(self.diagnostics, "Diagnostics")
+        root.addWidget(self.detail_tabs, 1)
+
+    def _get_service(self) -> DeviceWorkspaceService:
+        if self.service is None:
+            self.service = build_device_workspace()
+        return self.service
+
+    def search_devices(self) -> None:
+        query = self.search_input.text().strip()
+        if not query:
+            return
+        self._start_task(lambda: self._get_service().search_devices(query), self._search_ready, self._task_failed)
+
+    def _search_ready(self, result: object) -> None:
+        candidates, logs = result  # type: ignore[misc]
+        self.search_results = list(candidates)
+        clear_layout(self.results_layout)
+        if not self.search_results:
+            self.results_layout.addWidget(EmptyState("Aucun resultat", "Essayez un autre identifiant ou nom d'appareil."))
+        for index, candidate in enumerate(self.search_results):
+            button = QPushButton(f"{candidate.label}\n{candidate.detail}")
+            button.setObjectName("modeButton")
+            button.clicked.connect(lambda _=False, row=index: self.inspect_device(row))
+            self.results_layout.addWidget(button)
+        self._fill_diagnostics_from_logs(logs)
+
+    def inspect_device(self, row: int) -> None:
+        if row < 0 or row >= len(self.search_results):
+            return
+        self.current_selection = self.search_results[row]
+        self._inspect_selected()
+
+    def refresh_current_device(self) -> None:
+        if not self.current_selection:
+            return
+        self._inspect_selected()
+
+    def _inspect_selected(self) -> None:
+        selection = self.current_selection
+        assert selection is not None
+        self._start_task(lambda: self._get_service().inspect(selection), self._device_ready, self._task_failed)
+
+    def _device_ready(self, result: object) -> None:
+        self.current_result = result  # type: ignore[assignment]
+        resolved = self.current_result.resolved_identity
+        self.device_header.setText(resolved.device_name or resolved.serial_number or "Appareil")
+        status = self.current_result.status
+        self.health_summary.setText(f"Sante : {_STATUS_LABELS.get(status, status)} · {len(self.current_result.issues)} probleme(s)")
+        self.device_badges.setText(
+            f"Numero de serie : {not_available(resolved.serial_number)} · "
+            f"Managed Device ID : {not_available(resolved.intune_managed_device_id)}"
+        )
+        self.refresh_button.setEnabled(True)
+        self._fill_chain(self.current_result)
+        self._fill_issues(self.current_result.issues)
+        self._fill_identity(resolved, self.current_result.intune_block)
+        self._fill_autopilot_block(self.current_result.autopilot_block)
+        self._fill_entra_block(self.current_result.entra_block)
+        self._fill_intune_block(self.current_result.intune_block)
+        self.autopilot_open_button.setEnabled(bool(self._autopilot_identifier()))
+        self.entra_open_button.setEnabled(bool(self._entra_identifier()))
+        self.intune_open_button.setEnabled(bool(self._intune_identifier()))
+        self._fill_raw_data(self.current_result.raw_sources, self.current_result.sources)
+        self._fill_diagnostics(self.current_result)
+
+    def _fill_chain(self, result: DeviceWorkspaceResult) -> None:
+        clear_layout(self.chain_layout)
+        self.chain_layout.addWidget(_build_chain_row(self._chain_steps(result)))
+
+    def _chain_steps(self, result: DeviceWorkspaceResult) -> list[tuple[str, str, str]]:
+        steps: list[tuple[str, str, str]] = []
+        autopilot = result.autopilot_block
+        if autopilot is None:
+            steps.append(("Autopilot", "Non disponible", "neutral"))
+        elif autopilot.registered is True:
+            steps.append(("Autopilot", "Enregistre", "success"))
+        elif autopilot.registered is False:
+            steps.append(("Autopilot", "Non enregistre", "error"))
+        else:
+            steps.append(("Autopilot", "Inconnu", "neutral"))
+
+        if autopilot and autopilot.profile_status:
+            profile_status = autopilot.profile_status.casefold()
+            if profile_status in {"assignedinsync", "assignedoutofsync", "assignedunkownsyncstate"}:
+                steps.append(("Profil", "Assigne", "success"))
+            elif profile_status == "notassigned":
+                steps.append(("Profil", "Non assigne", "warning"))
+            elif profile_status == "pending":
+                steps.append(("Profil", "En attente", "warning"))
+            elif profile_status == "failed":
+                steps.append(("Profil", "Echec", "error"))
+            else:
+                steps.append(("Profil", "Inconnu", "neutral"))
+        else:
+            steps.append(("Profil", "Non disponible", "neutral"))
+
+        entra = result.entra_block
+        if entra is None:
+            steps.append(("Entra ID", "Non disponible", "neutral"))
+        elif entra.account_enabled is False:
+            steps.append(("Entra ID", "Desactive", "error"))
+        elif entra.account_enabled is True:
+            steps.append(("Entra ID", "Actif", "success"))
+        else:
+            steps.append(("Entra ID", "Inconnu", "neutral"))
+
+        intune = result.intune_block
+        steps.append(("Intune", "Gere", "success") if intune is not None else ("Intune", "Non disponible", "neutral"))
+
+        if intune is None or not intune.compliance_state:
+            steps.append(("Conformite", "Non disponible", "neutral"))
+        elif intune.compliance_state.casefold() == "compliant":
+            steps.append(("Conformite", "Conforme", "success"))
+        elif intune.compliance_state.casefold() == "unknown":
+            steps.append(("Conformite", "Inconnu", "neutral"))
+        else:
+            steps.append(("Conformite", "Non conforme", "error"))
+
+        return steps
+
+    def _fill_issues(self, issues) -> None:
+        clear_layout(self.issues_layout)
+        header = QLabel(f"Points d'attention  {len(issues)}")
+        header.setObjectName("sectionTitle")
+        self.issues_layout.addWidget(header)
+        if not issues:
+            self.issues_layout.addWidget(
+                EmptyState("Aucun probleme detecte", "Aucun probleme deterministe n'a ete detecte a partir des donnees disponibles.")
+            )
+            return
+        for issue in issues:
+            card = QFrame()
+            card.setObjectName(
+                "issueCritical" if issue.severity in {"CRITICAL", "ERROR"} else "issueWarning" if issue.severity == "WARNING" else "issueInfo"
+            )
+            layout = QVBoxLayout(card)
+            layout.setContentsMargins(14, 12, 14, 12)
+            title = QLabel(f"{issue.severity} · {issue.title}")
+            title.setObjectName("cardTitle")
+            reason = QLabel(issue.reason)
+            reason.setObjectName("muted")
+            source = QLabel(f"Source : {issue.source}")
+            source.setObjectName("muted")
+            evidence = QLabel(f"Preuve : {issue.evidence}") if issue.evidence else None
+            if evidence:
+                evidence.setObjectName("muted")
+            layout.addWidget(title)
+            layout.addWidget(reason)
+            layout.addWidget(source)
+            if evidence:
+                layout.addWidget(evidence)
+            self.issues_layout.addWidget(card)
+        self.issues_layout.addStretch()
+
+    def _fill_identity(self, resolved, intune_block) -> None:
+        self.identity_grid.set_rows(
+            [
+                ("Nom du poste", not_available(resolved.device_name)),
+                ("Numero de serie", not_available(resolved.serial_number)),
+                ("Intune Managed Device ID", not_available(resolved.intune_managed_device_id)),
+                ("Entra Object ID", not_available(resolved.entra_object_id)),
+                ("Entra deviceId", not_available(resolved.entra_device_id)),
+                ("Autopilot Device Identity ID", not_available(resolved.autopilot_device_id)),
+                ("OS", not_available(intune_block.operating_system if intune_block else None)),
+                ("Version OS", not_available(intune_block.os_version if intune_block else None)),
+                ("Conformite", not_available(intune_block.compliance_state if intune_block else None)),
+            ]
+        )
+        if resolved.conflicts:
+            lines = []
+            for conflict in resolved.conflicts:
+                values = ", ".join(f"{source}={value}" for source, value in conflict.values)
+                lines.append(f"{conflict.field} : {values}")
+            self.identity_conflict_label.setText("Incoherence detectee entre sources - " + " ; ".join(lines))
+            self.identity_conflict_label.show()
+        else:
+            self.identity_conflict_label.hide()
+
+    def _fill_autopilot_block(self, block) -> None:
+        registered = "Non disponible" if block is None or block.registered is None else ("Oui" if block.registered else "Non")
+        self.autopilot_block_grid.set_rows(
+            [
+                ("Enregistre", registered),
+                ("Profil", not_available(block.profile_name if block else None)),
+                ("Etat du profil", not_available(block.profile_status if block else None)),
+                ("Group Tag", not_available(block.group_tag if block else None)),
+            ]
+        )
+
+    def _fill_entra_block(self, block) -> None:
+        state = "Non disponible" if block is None or block.account_enabled is None else ("Actif" if block.account_enabled else "Desactive")
+        last_sign_in = relative_datetime(block.approximate_last_sign_in_datetime) if block and block.approximate_last_sign_in_datetime else "Non disponible"
+        self.entra_block_grid.set_rows(
+            [
+                ("Etat du compte", state),
+                ("Trust Type", not_available(block.trust_type if block else None)),
+                ("Gere (isManaged)", not_available(block.is_managed if block else None)),
+                ("Conforme (isCompliant)", not_available(block.is_compliant if block else None)),
+                ("Derniere connexion", last_sign_in),
+            ]
+        )
+
+    def _fill_intune_block(self, block) -> None:
+        last_sync = relative_datetime(block.last_sync_datetime) if block and block.last_sync_datetime else "Non disponible"
+        self.intune_block_grid.set_rows(
+            [
+                ("Conformite", not_available(block.compliance_state if block else None)),
+                ("Dernier check-in", last_sync),
+                ("OS", not_available(block.operating_system if block else None)),
+                ("Version OS", not_available(block.os_version if block else None)),
+                ("Proprietaire", not_available(block.owner_type if block else None)),
+            ]
+        )
+
+    def _autopilot_identifier(self) -> str | None:
+        if not self.current_result:
+            return None
+        resolved = self.current_result.resolved_identity
+        return resolved.autopilot_device_id or resolved.serial_number
+
+    def _entra_identifier(self) -> str | None:
+        if not self.current_result:
+            return None
+        resolved = self.current_result.resolved_identity
+        return resolved.entra_object_id or resolved.entra_device_id
+
+    def _intune_identifier(self) -> str | None:
+        if not self.current_result:
+            return None
+        return self.current_result.resolved_identity.intune_managed_device_id
+
+    def _open_autopilot(self) -> None:
+        identifier = self._autopilot_identifier()
+        if identifier:
+            self.open_in_module("Autopilot", identifier)
+
+    def _open_entra(self) -> None:
+        identifier = self._entra_identifier()
+        if identifier:
+            self.open_in_module("Entra ID", identifier)
+
+    def _open_intune(self) -> None:
+        identifier = self._intune_identifier()
+        if identifier:
+            self.open_in_module("Intune", identifier)
+
+    def _fill_raw_data(self, raw_sources: dict, sources) -> None:
+        self.raw_tabs.clear()
+        self.raw_editors = {}
+        for title, payload in raw_sources.items():
+            editor = QPlainTextEdit()
+            editor.setReadOnly(True)
+            editor.setPlainText(json.dumps(_raw_payload_with_metadata(title, payload, sources), indent=2, sort_keys=True))
+            self.raw_tabs.addTab(editor, title)
+            self.raw_editors[title] = editor
+
+    def _fill_diagnostics(self, result: DeviceWorkspaceResult) -> None:
+        text = _build_diagnostics_text(result.capabilities, result.sources, result.endpoint_logs)
+        self.diagnostics.setPlainText(text)
+
+    def _fill_diagnostics_from_logs(self, logs) -> None:
+        text = _build_diagnostics_text((), (), logs)
+        self.diagnostics.setPlainText(text)
+
+    def copy_raw_data(self) -> None:
+        editor = self.raw_tabs.currentWidget()
+        if isinstance(editor, QPlainTextEdit):
+            QApplication.clipboard().setText(editor.toPlainText())
+
+    def export_raw_data(self) -> None:
+        if not self.current_result:
+            return
+        resolved = self.current_result.resolved_identity
+        name = resolved.device_name or resolved.serial_number or "appareil"
+        path, _ = QFileDialog.getSaveFileName(self, "Exporter le JSON brut", f"{name}.json", "JSON (*.json)")
+        if path:
+            editor = self.raw_tabs.currentWidget()
+            if isinstance(editor, QPlainTextEdit):
+                Path(path).write_text(editor.toPlainText(), encoding="utf-8")
+
+    def copy_current_endpoint(self) -> None:
+        if not self.current_result:
+            return
+        title = self.raw_tabs.tabText(self.raw_tabs.currentIndex())
+        source = _find_source_for_title(title, self.current_result.sources)
+        if source:
+            QApplication.clipboard().setText(source.endpoint)
+
+    def export_diagnostics_bundle(self) -> None:
+        if not self.current_result:
+            return
+        directory = QFileDialog.getExistingDirectory(self, "Exporter les diagnostics")
+        if not directory:
+            return
+        path = export_workspace_support_bundle(self.current_result, Path(directory))
+        QMessageBox.information(self, "Diagnostics exportes", f"Support bundle cree :\n{path}")
+
+    def _task_failed(self, message: str) -> None:
+        QMessageBox.critical(self, "Appareil", message)
+        self.diagnostics.setPlainText(message)
+
+
 class SettingsPage(QWidget, AsyncPageMixin):
     def __init__(self):
         super().__init__()
@@ -2307,6 +2761,7 @@ class MainWindow(QMainWindow):
 
         self.pages: dict[str, QWidget] = {}
         self._add_page("Accueil", HomePage(self.navigate), QStyle.SP_DirHomeIcon)
+        self._add_page("Appareil", make_scroll_page(WorkspacePage(self._open_module)), QStyle.SP_DesktopIcon)
         self._add_page("Intune", make_scroll_page(IntunePage()), QStyle.SP_ComputerIcon)
         self._add_page("Entra ID", make_scroll_page(EntraPage()), QStyle.SP_FileDialogDetailedView)
         self._add_page("Autopilot", make_scroll_page(AutopilotPage()), QStyle.SP_DriveHDIcon)
@@ -2336,6 +2791,20 @@ class MainWindow(QMainWindow):
                     widget = page.widget()
                     if isinstance(widget, DeploymentToolsPage):
                         widget.activate_mode(mode)
+                return
+
+    def _open_module(self, page_name: str, identifier: str) -> None:
+        """Open the same device in a specialized page (Intune/Autopilot/Entra
+        ID) using an identifier already resolved by the Appareil workspace,
+        instead of asking the user to search again."""
+        for index in range(self.nav.count()):
+            if self.nav.item(index).text() == page_name:
+                self.nav.setCurrentRow(index)
+                page = self.pages[page_name]
+                widget = page.widget() if isinstance(page, QScrollArea) else page
+                open_with_identifier = getattr(widget, "open_with_identifier", None)
+                if callable(open_with_identifier):
+                    open_with_identifier(identifier)
                 return
 
     def refresh_graph_status(self) -> None:
