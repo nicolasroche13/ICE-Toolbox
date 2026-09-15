@@ -1,0 +1,105 @@
+name: Windows packaging validation (manual)
+
+# One-off Phase 7.1 validation aid, separate from windows-build.yml (which only
+# builds and uploads the artifact). This workflow runs the scriptable checks
+# that a headless Windows CI runner can genuinely perform: keyring backend
+# resolution, a TEST-ONLY secret round-trip through Windows Credential
+# Manager, Support Bundle generation/sanitization from synthetic data (no
+# tenant), AppData/log file creation, and a non-interactive Microsoft Defender
+# scan of the built executable. It cannot replace a human validating the
+# interactive parts (double-click launch, SmartScreen dialog, DPI/HiDPI,
+# French UI rendering) on a real Windows 11 desktop - see docs/PACKAGING.md.
+#
+# Manual only (workflow_dispatch, never push/PR). No Tenant ID, Client ID or
+# Client Secret anywhere - the Credential Manager round-trip uses an explicit
+# test-only, non-sensitive placeholder value under a service name distinct
+# from the real application's, and deletes it afterward.
+on:
+  workflow_dispatch: {}
+
+jobs:
+  validate-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-build.txt
+
+      - name: Build with PyInstaller
+        run: pyinstaller --noconfirm --clean packaging/windows/EndpointToolbox.spec
+
+      - name: Check keyring backend resolution
+        run: |
+          python -c "import keyring; k = keyring.get_keyring(); print('Resolved backend:', type(k).__module__ + '.' + type(k).__qualname__)"
+
+      - name: Round-trip a TEST-ONLY secret through Windows Credential Manager
+        run: |
+          python -c "import keyring
+          SERVICE = 'EndpointToolbox-Phase7.1-Validation-DO-NOT-USE-FOR-REAL-SECRETS'
+          keyring.set_password(SERVICE, 'test-user', 'test-only-non-sensitive-placeholder')
+          value = keyring.get_password(SERVICE, 'test-user')
+          assert value == 'test-only-non-sensitive-placeholder', 'round-trip mismatch'
+          print('Round-trip OK via', type(keyring.get_keyring()).__name__)
+          keyring.delete_password(SERVICE, 'test-user')
+          print('Deleted OK, get after delete ->', keyring.get_password(SERVICE, 'test-user'))
+          "
+
+      - name: Generate and inspect a Support Bundle from synthetic data (no tenant)
+        run: |
+          python -c "import sys, zipfile, json
+          sys.path.insert(0, 'tests')
+          from test_support_bundle import _sample_result
+          from app.intune.support_bundle import export_support_bundle
+          from pathlib import Path
+          result = _sample_result()
+          out_dir = Path('support_bundle_validation_output')
+          path = export_support_bundle(result, out_dir)
+          print('Bundle path:', path, '- exists:', path.exists())
+          with zipfile.ZipFile(path) as z:
+              names = z.namelist()
+              print('Zip entries:', names)
+              content = z.read('diagnostics.json').decode('utf-8')
+              for leaked in ('super-secret', 'token-value', 'should-never-leak'):
+                  assert leaked not in content, f'sanitization failed: {leaked} present'
+              print('Sanitization confirmed: none of the injected fake secrets are present in diagnostics.json')
+          "
+
+      - name: Run EndpointToolbox.exe briefly and inspect AppData
+        shell: pwsh
+        run: |
+          $proc = Start-Process -FilePath "dist\EndpointToolbox.exe" -PassThru
+          Start-Sleep -Seconds 8
+          $alive = -not $proc.HasExited
+          Write-Host "Process alive after 8s: $alive"
+          if (-not $alive) { Write-Host "Process exited early with code: $($proc.ExitCode)" }
+          if ($alive) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+          $appData = Join-Path $env:APPDATA "EndpointToolbox"
+          Write-Host "AppData dir ($appData) exists: $(Test-Path $appData)"
+          if (Test-Path $appData) {
+            Get-ChildItem -Recurse $appData | ForEach-Object { Write-Host " -" $_.FullName }
+            $logFile = Join-Path $appData "logs\endpoint_toolbox.log"
+            if (Test-Path $logFile) {
+              Write-Host "--- log file content ---"
+              Get-Content $logFile
+            }
+          }
+
+      - name: Non-interactive Microsoft Defender scan of the executable
+        shell: pwsh
+        run: |
+          $mpcmd = "C:\Program Files\Windows Defender\MpCmdRun.exe"
+          if (Test-Path $mpcmd) {
+            & $mpcmd -Scan -ScanType 3 -File "$PWD\dist\EndpointToolbox.exe"
+            Write-Host "Defender scan exit code: $LASTEXITCODE (0 = no threat found)"
+          } else {
+            Write-Host "MpCmdRun.exe not found on this runner - Defender scan skipped"
+          }
