@@ -54,9 +54,67 @@ jobs:
             -CertificateThumbprint "${{ vars.CODESIGN_THUMBPRINT }}" `
             -TimestampUrl "${{ vars.CODESIGN_TIMESTAMP_URL }}"
 
+      # Everything below inspects the exact file that gets uploaded - it runs
+      # after the optional signing step above, whichever branch it took, so
+      # the reported hash/signature always matches the downloaded artifact.
+      - name: Analyze the built binary (hash, Authenticode status)
+        shell: pwsh
+        run: |
+          Get-Item dist\EndpointToolbox.exe | Format-List Name, Length, LastWriteTime
+          Get-FileHash dist\EndpointToolbox.exe -Algorithm SHA256
+          $sig = Get-AuthenticodeSignature dist\EndpointToolbox.exe
+          Write-Host "Get-AuthenticodeSignature Status: $($sig.Status)"
+          Write-Host "Get-AuthenticodeSignature StatusMessage: $($sig.StatusMessage)"
+          if ($sig.Status -ne "NotSigned") {
+            powershell -ExecutionPolicy Bypass -File scripts/verify_windows_signature.ps1 -Path dist/EndpointToolbox.exe
+          } else {
+            Write-Host "Unsigned build (CODESIGN_THUMBPRINT was not set) - this is the expected default."
+          }
+
+      - name: Automated launch smoke test (process-level only, not a UI test)
+        shell: pwsh
+        run: |
+          # GitHub Actions is headless: this can only confirm the frozen
+          # process starts, survives briefly without crashing, and that its
+          # first-run path resolution (config/log directories) works with no
+          # external Python/pip install on this runner beyond what PyInstaller
+          # already bundled. It is NOT a validation of the visible UI, DPI
+          # rendering, or any interactive behavior - see docs/PACKAGING.md for
+          # what still requires a human on a real Windows 11 desktop.
+          $proc = Start-Process -FilePath "dist\EndpointToolbox.exe" -PassThru
+          Start-Sleep -Seconds 8
+          $alive = -not $proc.HasExited
+          Write-Host "Process alive after 8s (no crash, no missing external dependency): $alive"
+          if (-not $alive) {
+            Write-Host "Process exited early with code: $($proc.ExitCode)"
+          } else {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          }
+          $appData = Join-Path $env:APPDATA "EndpointToolbox"
+          $appDataOk = Test-Path $appData
+          Write-Host "AppData directory created at first run ($appData): $appDataOk"
+          if ($appDataOk) {
+            Get-ChildItem -Recurse $appData | ForEach-Object { Write-Host " -" $_.FullName }
+          }
+          if (-not $alive) {
+            Write-Error "The frozen executable did not survive 8 seconds - treating this as a build failure."
+            exit 1
+          }
+
+      - name: Microsoft Defender scan (non-interactive; no exclusions, Defender left fully enabled)
+        shell: pwsh
+        run: |
+          $mpcmd = "C:\Program Files\Windows Defender\MpCmdRun.exe"
+          if (Test-Path $mpcmd) {
+            & $mpcmd -Scan -ScanType 3 -File "$PWD\dist\EndpointToolbox.exe"
+            Write-Host "Defender scan exit code: $LASTEXITCODE (0 = no threat found)"
+          } else {
+            Write-Host "MpCmdRun.exe not found on this runner - Defender scan NOT TESTED."
+          }
+
       - name: Upload EndpointToolbox.exe artifact
         uses: actions/upload-artifact@v4
         with:
-          name: EndpointToolbox-windows
+          name: EndpointToolbox-Windows-x64
           path: dist/EndpointToolbox.exe
           if-no-files-found: error

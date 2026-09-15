@@ -73,7 +73,7 @@ Via deux workflows GitHub Actions (`windows-build.yml` et `windows-validate.yml`
 
 ### (B) Validation Windows 11 interactive restante (Phase 7.1)
 
-1. Recuperer `EndpointToolbox.exe` : artifact `EndpointToolbox-windows` du workflow `windows-build.yml` (GitHub Actions, repo `nicolasroche13/ICE-Toolbox`), ou reconstruire localement via `scripts/build_windows.ps1` sur un poste Windows.
+1. Recuperer `EndpointToolbox.exe` : artifact `EndpointToolbox-Windows-x64` du workflow `windows-build.yml` (GitHub Actions, repo `nicolasroche13/ICE-Toolbox`), ou reconstruire localement via `scripts/build_windows.ps1` sur un poste Windows.
 2. Sur un vrai poste Windows 11 x64, suivre les points **non coches** de la checklist dans `docs/PACKAGING.md` ("Checklist de validation manuelle Windows 11") : double-clic, apparence de l'UI, DPI/HiDPI, francais a l'ecran, cycle Settings complet via l'interface, pages Intune/Autopilot/Entra ID/Appareil, comportement SmartScreen reel (telecharger le fichier via un navigateur pour reproduire fidelement le marqueur "zone Internet" avant de le lancer).
 3. Revenir avec l'agent pour consigner le resultat exact (coche/pas coche, comportement observe) dans `docs/PACKAGING.md`.
 
