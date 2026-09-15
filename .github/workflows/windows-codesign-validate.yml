@@ -94,12 +94,21 @@ jobs:
 
       - name: Explicitly trust the TEST certificate on THIS ephemeral runner only (one-off CI demonstration, not done by any shipped script)
         shell: pwsh
+        timeout-minutes: 3
         run: |
           $certPath = "Cert:\CurrentUser\My\$env:TEST_CERT_THUMBPRINT"
           $cert = Get-Item $certPath
           $tempCer = Join-Path $env:RUNNER_TEMP "test-cert-public.cer"
           [IO.File]::WriteAllBytes($tempCer, $cert.Export("Cert"))
-          Import-Certificate -FilePath $tempCer -CertStoreLocation Cert:\CurrentUser\Root
+          # certutil -addstore -f is the standard non-interactive way to add a root
+          # certificate in CI/automation: the higher-level Import-Certificate cmdlet
+          # can block on a Windows security confirmation prompt for the Root store
+          # with no one able to answer it in a headless job.
+          & certutil.exe -addstore -f Root $tempCer
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "certutil -addstore failed (exit code $LASTEXITCODE)"
+            exit 1
+          }
           Write-Host "Imported the TEST certificate's PUBLIC part into CurrentUser\Root on this throwaway runner, for this demonstration only."
           Write-Host "This is NOT something create_test_codesigning_cert.ps1, sign_windows.ps1 or verify_windows_signature.ps1 does automatically."
 
