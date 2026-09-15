@@ -1,0 +1,112 @@
+name: Windows code signing validation (manual, TEST certificate only)
+
+# One-off Phase 7.2 validation aid - NOT part of the normal build pipeline
+# (windows-build.yml is unaffected and still ships unsigned by default).
+# Creates a throwaway, clearly-marked TEST certificate on the ephemeral
+# runner, signs the build with it, and demonstrates BOTH documented
+# SmartScreen scenarios from docs/CODE_SIGNING.md section 7:
+#   - case 2: signed with a self-signed certificate NOT yet trusted on this
+#     machine (the real, honest default outcome of scripts/sign_windows.ps1
+#     with a fresh test certificate - expected to report untrusted, not
+#     "Valid");
+#   - case 3 analogue: after this workflow explicitly imports the TEST
+#     certificate's public part into this SAME ephemeral runner's
+#     CurrentUser\Root store (a deliberate, clearly-labeled, ONE-OFF
+#     demonstration step - never something scripts/create_test_codesigning_cert.ps1,
+#     scripts/sign_windows.ps1 or scripts/verify_windows_signature.ps1 do
+#     automatically), the same already-signed file becomes trusted here.
+#
+# Nothing here persists beyond this run: the runner and its certificate
+# store are destroyed when the job ends. No certificate, PFX, password, or
+# key is committed anywhere. Manual only (workflow_dispatch), no secrets.
+on:
+  workflow_dispatch: {}
+
+jobs:
+  validate-code-signing:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-build.txt
+
+      - name: Build with PyInstaller
+        run: pyinstaller --noconfirm --clean packaging/windows/EndpointToolbox.spec
+
+      - name: Locate signtool.exe
+        shell: pwsh
+        run: |
+          $signtool = Get-Command signtool.exe -ErrorAction SilentlyContinue
+          if (-not $signtool) {
+            $sdkRoots = @("${env:ProgramFiles(x86)}\Windows Kits\10\bin", "${env:ProgramFiles}\Windows Kits\10\bin")
+            foreach ($root in $sdkRoots) {
+              if ($root -and (Test-Path $root)) {
+                $found = Get-ChildItem -Path $root -Recurse -Filter "signtool.exe" -ErrorAction SilentlyContinue |
+                  Where-Object { $_.FullName -match "\\x64\\" } | Select-Object -First 1
+                if ($found) { Write-Host "signtool found at: $($found.FullName)"; exit 0 }
+              }
+            }
+            Write-Host "signtool.exe NOT found on this runner."
+          } else {
+            Write-Host "signtool found on PATH: $($signtool.Source)"
+          }
+
+      - name: Create TEST code signing certificate
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts/create_test_codesigning_cert.ps1
+          $cert = Get-ChildItem Cert:\CurrentUser\My |
+            Where-Object { $_.Subject -match "Endpoint Toolbox TEST Code Signing" } |
+            Sort-Object NotBefore -Descending | Select-Object -First 1
+          Write-Host "Subject: $($cert.Subject)"
+          Write-Host "Thumbprint: $($cert.Thumbprint)"
+          "TEST_CERT_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Sign with the untrusted TEST certificate (real, honest outcome - no timestamp URL invented)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts/sign_windows.ps1 -Path dist/EndpointToolbox.exe -CertificateThumbprint $env:TEST_CERT_THUMBPRINT
+          Write-Host "sign_windows.ps1 exit code: $LASTEXITCODE"
+
+      - name: Inspect signature status BEFORE trusting the TEST certificate (docs/CODE_SIGNING.md case 2)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $sig = Get-AuthenticodeSignature -FilePath dist/EndpointToolbox.exe
+          Write-Host "Get-AuthenticodeSignature Status: $($sig.Status)"
+          Write-Host "Get-AuthenticodeSignature StatusMessage: $($sig.StatusMessage)"
+          if ($sig.SignerCertificate) {
+            Write-Host "Signer Subject: $($sig.SignerCertificate.Subject)"
+            Write-Host "Signer Thumbprint: $($sig.SignerCertificate.Thumbprint)"
+          }
+          powershell -ExecutionPolicy Bypass -File scripts/verify_windows_signature.ps1 -Path dist/EndpointToolbox.exe
+          Write-Host "verify_windows_signature.ps1 exit code: $LASTEXITCODE"
+
+      - name: Explicitly trust the TEST certificate on THIS ephemeral runner only (one-off CI demonstration, not done by any shipped script)
+        shell: pwsh
+        run: |
+          $certPath = "Cert:\CurrentUser\My\$env:TEST_CERT_THUMBPRINT"
+          $cert = Get-Item $certPath
+          $tempCer = Join-Path $env:RUNNER_TEMP "test-cert-public.cer"
+          [IO.File]::WriteAllBytes($tempCer, $cert.Export("Cert"))
+          Import-Certificate -FilePath $tempCer -CertStoreLocation Cert:\CurrentUser\Root
+          Write-Host "Imported the TEST certificate's PUBLIC part into CurrentUser\Root on this throwaway runner, for this demonstration only."
+          Write-Host "This is NOT something create_test_codesigning_cert.ps1, sign_windows.ps1 or verify_windows_signature.ps1 does automatically."
+
+      - name: Re-inspect signature status AFTER explicitly trusting the TEST certificate (docs/CODE_SIGNING.md case 3 analogue)
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts/verify_windows_signature.ps1 -Path dist/EndpointToolbox.exe
+          Write-Host "verify_windows_signature.ps1 exit code: $LASTEXITCODE"
+          $sig = Get-AuthenticodeSignature -FilePath dist/EndpointToolbox.exe
+          Write-Host "Final Get-AuthenticodeSignature Status: $($sig.Status)"
