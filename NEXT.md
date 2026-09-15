@@ -13,7 +13,7 @@
 | Tests mockes/structurels | Terminee, tous verts (34) | Terminee, tous verts (35) | Terminee, tous verts (28) | Terminee, tous verts (31) | Terminee, tous verts (16 structurels) |
 | `compileall` | Propre | Propre | Propre | Propre (confirme aussi sur Windows reel, Phase 7.1) | Propre |
 | **Validation contre un tenant Microsoft reel** | **Non effectuee** | **Non effectuee** | **Non effectuee** | Sans objet (packaging n'appelle jamais Graph) | Sans objet |
-| **Build Windows reel** | Sans objet | Sans objet | Sans objet | **Effectue (Phase 7.1, 2026-09-15)** - GitHub Actions `windows-latest`, `EndpointToolbox.exe` produit, tests verts sur Windows reel | Sans objet direct - build reste possible sans certificat (voir Phase 7.2) |
+| **Build Windows reel** | Sans objet | Sans objet | Sans objet | **Effectue (Phase 7.1 puis 7.3, 2026-09-15)** - GitHub Actions `windows-latest`. Artifact de distribution reel : `EndpointToolbox-Windows-x64` (run 35014507021, commit `4c12cfa`), SHA-256 `2A3CED28CEC8F533C43817D41CE2F3481E15E9BBD4B8BDBEC57E00E13EC26BC3`, non signe. Detail : `docs/PACKAGING.md`, "Phase 7.3". | Sans objet direct - build reste possible sans certificat (voir Phase 7.2) |
 | **Validation Windows 11 desktop interactive** | Sans objet | Sans objet | Sans objet | **Partiellement effectuee** - voir detail ci-dessous | Sans objet |
 | **Signature Authenticode reelle** | Sans objet | Sans objet | Sans objet | Sans objet | **Signature de TEST reellement effectuee (2026-09-15)** - voir detail ci-dessous et `docs/CODE_SIGNING.md`. Aucun certificat public. |
 

@@ -340,6 +340,53 @@ necessitent un humain sur un vrai Windows 11 :
   confirmation obtenue, le processus reste actif au moins 8 secondes sans crash
   sur le runner CI.
 
+## Phase 7.3 - Artefact de distribution reel (2026-09-15)
+
+Livraison demandee explicitement : un `EndpointToolbox.exe` telechargeable reel,
+avec analyse binaire et test de demarrage automatise integres au workflow de
+build lui-meme. `windows-build.yml` a ete enrichi (pas de nouveau workflow cree)
+avec trois etapes supplementaires apres la construction PyInstoller : analyse
+binaire (`Get-Item`, `Get-FileHash`, `Get-AuthenticodeSignature`), test de
+demarrage automatise (process-level uniquement), et scan Microsoft Defender.
+L'artifact a ete renomme `EndpointToolbox-windows` -> `EndpointToolbox-Windows-x64`.
+
+| Element | Valeur reelle observee |
+| --- | --- |
+| Run GitHub Actions | `windows-build.yml`, run 35014507021 |
+| Commit construit | `4c12cfa` (branche `main`) |
+| Runner | `windows-latest` (Windows Server, GitHub-hoste) |
+| Python | 3.12.10 |
+| Tests | **206 passed in 6.07s** |
+| `compileall` | Propre (etape verte) |
+| PyInstoller | Succes, seul avertissement attendu (`jinja2`, sans consequence) - **aucune correction necessaire, succes des le premier essai** |
+| Fichier | `EndpointToolbox.exe`, 77 276 285 octets |
+| SHA-256 (`Get-FileHash`, cote CI) | `2A3CED28CEC8F533C43817D41CE2F3481E15E9BBD4B8BDBEC57E00E13EC26BC3` |
+| SHA-256 (verifie independamment apres telechargement local, macOS `shasum -a 256`) | `2a3ced28cec8f533c43817d41ce2f3481e15e9bbd4b8bdbec57e00e13ec26bc3` - **identique** |
+| Format binaire (`file`, verifie localement) | PE32+ executable (GUI) x86-64, pour MS Windows |
+| `Get-AuthenticodeSignature` | `Status: NotSigned` - **executable non signe** (aucune variable `CODESIGN_THUMBPRINT` sur le depot ; comportement par defaut attendu) |
+| Test de demarrage automatise | Processus lance, **actif apres 8 secondes sans crash** (aucune dependance Python externe manquante), puis arrete proprement |
+| AppData au premier lancement | `C:\Users\runneradmin\AppData\Roaming\EndpointToolbox\` **reellement cree** |
+| Scan Microsoft Defender | **Code de sortie 0 (aucune menace detectee)** - `MpCmdRun.exe -Scan -ScanType 3` ; Defender non modifie, aucune exclusion creee |
+| Artifact GitHub Actions | `EndpointToolbox-Windows-x64` - **uploade avec succes**, contient uniquement `EndpointToolbox.exe` |
+| Signature publique | **NON** - certificat de test uniquement disponible (Phase 7.2), aucun certificat public n'existe pour ce projet |
+| SmartScreen | **Non testable depuis GitHub Actions** (necessite le marqueur "telecharge depuis Internet", absent d'un fichier construit et teste dans le meme job) - a valider par l'utilisateur sur un poste Windows 11 reel |
+
+**Cet artifact est celui a telecharger et utiliser** : `EndpointToolbox.exe`
+non signe (aucun certificat public n'existe), correspondant exactement au code
+du commit `4c12cfa`. Ne pas confondre avec la signature TEST demontree
+techniquement en Phase 7.2 (`docs/CODE_SIGNING.md`) : ce certificat de test
+n'a jamais ete utilise pour cet artifact et de toute facon ne survit pas a la
+fin d'un run GitHub Actions (magasin de certificats de l'ephemeral runner
+detruit avec lui) - il ne peut donc pas etre reutilise pour signer un futur
+build sans recreer le certificat a chaque fois, et n'apporte aucune confiance
+publique dans tous les cas.
+
+**Chemin exact pour telecharger dans GitHub** :
+`nicolasroche13/ICE-Toolbox` -> onglet **Actions** -> workflow **"Windows
+portable build (manual)"** -> run du **15 septembre 2026** (commit `4c12cfa`,
+run 35014507021) -> section **Artifacts** en bas de la page du run ->
+**`EndpointToolbox-Windows-x64`**.
+
 ## Checklist de validation manuelle Windows 11
 
 A executer par l'utilisateur sur un vrai poste Windows 11 x64 - la Phase 7.1 a
@@ -347,7 +394,7 @@ valide les points marques [x] via GitHub Actions (Windows reel mais non
 interactif) ; les points marques [ ] necessitent encore un humain sur un poste
 Windows 11 physique/VM interactif :
 
-1. [x] Recuperer `EndpointToolbox.exe` (artifact `windows-build.yml`, voir plus haut).
+1. [x] Recuperer `EndpointToolbox.exe` (artifact `EndpointToolbox-Windows-x64` du run 35014507021, voir Phase 7.3 ci-dessus).
 2. [ ] Lancer sur Windows 11 x64 (double-clic depuis l'Explorateur).
 3. [x] Verifier l'absence de fenetre console (confirme au niveau binaire : sous-systeme PE GUI ; confirme aussi par un lancement reel sans fenetre console observee en CI).
 4. [ ] Verifier le demarrage visuel de l'interface (fenetre principale, sidebar, navigation) - le processus demarre et reste actif (confirme), l'apparence n'a pas ete verifiee visuellement.
