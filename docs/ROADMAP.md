@@ -110,7 +110,7 @@ Statut : implemente (tests mockes uniquement). **Validation contre un tenant Mic
 
 ## Phase 7 - Packaging Windows (application portable) read-only
 
-Statut : packaging prepare et teste structurellement (macOS) ; **build Windows reel non effectue et validation Windows 11 reelle non effectuee**. Voir `docs/PACKAGING.md` (checklist complete) et `NEXT.md`. Aucune fonctionnalite metier, aucune permission Graph, aucune ecriture Graph n'a ete ajoutee - strictement du packaging.
+Statut : packaging prepare (macOS) ; **build Windows reel effectue avec succes en Phase 7.1 (2026-09-15, GitHub Actions)** ; validation Windows 11 desktop interactive **partiellement effectuee** (backend keyring, Credential Manager, AppData/logs, Support Bundle et scan Defender valides reellement par script sur Windows ; double-clic, apparence UI, DPI/HiDPI, SmartScreen reel et cycle Settings via l'interface restent a valider par un humain sur un poste Windows 11 physique/VM). Voir `docs/PACKAGING.md` (detail complet et checklist) et `NEXT.md`. Aucune fonctionnalite metier, aucune permission Graph, aucune ecriture Graph n'a ete ajoutee - strictement du packaging.
 
 - Outil : PyInstoller (onefile, `console=False`), configure dans `packaging/windows/EndpointToolbox.spec` ; choix documente en DECISIONS.md D033.
 - `app/core/paths.py` (nouveau) : resolution dev/frozen centralisee, seul point de contact avec `sys.frozen`/`sys._MEIPASS` (D034). `resource_path()` est prepare mais non consomme - aucune ressource embarquee n'existe aujourd'hui.
@@ -122,8 +122,9 @@ Statut : packaging prepare et teste structurellement (macOS) ; **build Windows r
 - Aucune signature de code (D039) ; SmartScreen avertira au premier lancement, documente comme comportement attendu.
 - `scripts/build_windows.ps1` : build reproductible (venv, dependances, tests, `compileall`, PyInstoller), refuse de s'executer hors Windows.
 - `.github/workflows/windows-build.yml` : workflow manuel (`workflow_dispatch` uniquement), aucun secret, aucune publication de Release.
-- 31 tests dedies (`tests/test_paths.py`, `tests/test_secrets.py`, `tests/test_config_store.py`, `tests/test_logging_setup.py`) : resolution de chemins dev/frozen, comportements du Credential Manager (present/absent/supprime/mis a jour/indisponible), absence du secret dans `graph_config.json` et dans les logs.
-- Build reellement effectue : **structurel, sur macOS uniquement** (PyInstoller ne cross-compile pas un `.exe` Windows). Aucun `.exe` Windows n'a ete produit ni teste sur un poste Windows 11 reel.
+- 31 tests dedies (`tests/test_paths.py`, `tests/test_secrets.py`, `tests/test_config_store.py`, `tests/test_logging_setup.py`) : resolution de chemins dev/frozen, comportements du Credential Manager (present/absent/supprime/mis a jour/indisponible), absence du secret dans `graph_config.json` et dans les logs. Les 190 tests du projet (dont ces 31) sont verts sur Windows reel (Phase 7.1).
+- `.github/workflows/windows-validate.yml` (Phase 7.1, nouveau) : workflow manuel de validation - backend keyring, round-trip Credential Manager avec un secret de test non sensible, Support Bundle synthetique, AppData/logs, scan Defender non interactif.
+- Build reellement effectue : **oui, en Phase 7.1 (2026-09-15)** via GitHub Actions `windows-latest` - `EndpointToolbox.exe` produit (77 275 947 octets, SHA-256 `7ced561a47eb52357b6b7952a64adb1a8f1ff75f0149bed1e1faefff53f81374`), 190 tests verts sur Windows reel, aucune correction necessaire. Ce runner est un Windows Server cloud, pas un poste Windows 11 desktop interactif - voir `docs/PACKAGING.md` pour le detail exact de ce qui reste a valider par un humain.
 
 ## Phase 8 - Entra ID au-dela de l'inspection device (hors perimetre actuel)
 

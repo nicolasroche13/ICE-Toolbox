@@ -12,6 +12,7 @@ config/local.json
 build/
 dist/
 *.exe
+support_bundle_validation_output/
 
 # Python
 .venv/
