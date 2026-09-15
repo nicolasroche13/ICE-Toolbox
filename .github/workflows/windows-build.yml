@@ -5,6 +5,17 @@ name: Windows portable build (manual)
 # uploads it as a build artifact - it never talks to Microsoft Graph and never
 # publishes a GitHub Release. No Tenant ID, Client ID or Client Secret exists
 # anywhere in this workflow or the repository it checks out.
+#
+# Optional code signing (Phase 7.2, disabled by default): the "Sign
+# EndpointToolbox.exe" step below only runs if the repository/organization
+# VARIABLE `CODESIGN_THUMBPRINT` is set (Settings > Secrets and variables >
+# Actions > Variables - a thumbprint is not confidential, so this is a plain
+# variable, never a secret). It is a no-op today because that variable does
+# not exist. It is designed for a SELF-HOSTED Windows runner whose local
+# Certificate Store already holds the signing certificate - see
+# docs/CODE_SIGNING.md, "GitHub Actions". No PFX file, private key or PFX
+# password is ever read from a secret here, and none should be added: this
+# workflow deliberately never imports a private key from CI secrets.
 on:
   workflow_dispatch: {}
 
@@ -33,6 +44,15 @@ jobs:
 
       - name: Build with PyInstaller
         run: pyinstaller --noconfirm --clean packaging/windows/EndpointToolbox.spec
+
+      - name: Sign EndpointToolbox.exe (optional, no-op unless CODESIGN_THUMBPRINT is set)
+        if: ${{ vars.CODESIGN_THUMBPRINT != '' }}
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File scripts/sign_windows.ps1 `
+            -Path dist/EndpointToolbox.exe `
+            -CertificateThumbprint "${{ vars.CODESIGN_THUMBPRINT }}" `
+            -TimestampUrl "${{ vars.CODESIGN_TIMESTAMP_URL }}"
 
       - name: Upload EndpointToolbox.exe artifact
         uses: actions/upload-artifact@v4

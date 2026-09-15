@@ -14,6 +14,13 @@ dist/
 *.exe
 support_bundle_validation_output/
 
+# Code signing private key material (Phase 7.2) - never commit a PFX/P12 or
+# a raw private key. Public certificates (.cer/.crt) are NOT secret and are
+# deliberately NOT ignored here - see docs/CODE_SIGNING.md.
+*.pfx
+*.p12
+*.key
+
 # Python
 .venv/
 __pycache__/

@@ -15,7 +15,20 @@
     to Microsoft Graph - Test Connection and Support Bundle use existing
     application code, unrelated to this script.
 
+    Optional code signing (Phase 7.2): if the environment variable
+    CODESIGN_THUMBPRINT is set, this script signs dist\EndpointToolbox.exe
+    with scripts\sign_windows.ps1 as the LAST step, strictly after
+    PyInstaller and after nothing else can touch the file - see
+    docs/CODE_SIGNING.md. If CODESIGN_THUMBPRINT is not set (the default),
+    the build produces an unsigned executable exactly as before; a
+    certificate is never required to build EndpointToolbox.exe.
+
 .EXAMPLE
+    powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1
+
+.EXAMPLE
+    $env:CODESIGN_THUMBPRINT = "<YOUR-CERTIFICATE-THUMBPRINT>"
+    $env:CODESIGN_TIMESTAMP_URL = "<YOUR-CHOSEN-RFC3161-TIMESTAMP-URL>"   # optional
     powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1
 #>
 
@@ -69,4 +82,23 @@ if (-not (Test-Path $ExePath)) {
 
 $SizeMb = [Math]::Round((Get-Item $ExePath).Length / 1MB, 1)
 Write-Host "==> Build succeeded: $ExePath ($SizeMb MB)"
+
+if ($env:CODESIGN_THUMBPRINT) {
+    Write-Host "==> CODESIGN_THUMBPRINT is set: signing $ExePath (last step, after PyInstaller)"
+    $signArgs = @{
+        Path                  = $ExePath
+        CertificateThumbprint = $env:CODESIGN_THUMBPRINT
+    }
+    if ($env:CODESIGN_TIMESTAMP_URL) {
+        $signArgs["TimestampUrl"] = $env:CODESIGN_TIMESTAMP_URL
+    }
+    & (Join-Path $PSScriptRoot "sign_windows.ps1") @signArgs
+    if ($LASTEXITCODE -ne 0) {
+        Fail "Signing failed - see scripts\sign_windows.ps1 output above. The unsigned $ExePath from PyInstaller is unaffected on disk only if signing never partially wrote to it; re-run the build to get a clean unsigned artifact if needed."
+    }
+    Write-Host "==> Signed and verified: $ExePath"
+} else {
+    Write-Host "==> CODESIGN_THUMBPRINT not set: $ExePath is UNSIGNED (this is the default and always a valid way to build)."
+}
+
 Write-Host "==> Next: follow the manual Windows 11 checklist in docs/PACKAGING.md before distributing this file."
