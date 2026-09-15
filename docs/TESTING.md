@@ -205,13 +205,26 @@ Packaging Windows (Phase 7) :
 - idempotence (`configure_logging()` appele deux fois n'ajoute pas de handler en double) ;
 - aucune occurrence du mot "secret" dans le fichier de log apres usage normal.
 
+Code Signing (Phase 7.2, `tests/test_code_signing_structure.py`, 16 tests structurels - aucune signature Authenticode reelle n'est mockee, voir "Gaps connus") :
+
+- `scripts/build_windows.ps1` reste utilisable sans certificat (signature optionnelle, activee uniquement par `CODESIGN_THUMBPRINT`) ;
+- aucun thumbprint ni URL de timestamp code en dur dans `build_windows.ps1` ou `sign_windows.ps1` ;
+- `sign_windows.ps1` refuse un fichier inexistant, utilise `/fd sha256` (jamais `/fd sha1`), verifie immediatement (`Get-AuthenticodeSignature`, `signtool`) et peut sortir en erreur ;
+- `verify_windows_signature.ps1` classe explicitement UNSIGNED/VALID/INVALID/UNTRUSTED ;
+- `create_test_codesigning_cert.ps1` ne pretend jamais etre Microsoft ou une entreprise tierce, n'exporte pas la cle privee, ne modifie jamais Trusted Root/Trusted Publishers (comme les deux autres scripts) ;
+- l'etape de signature de `windows-build.yml` est gardee par `vars.CODESIGN_THUMBPRINT` (jamais un `secrets.*`) et le workflow continue de produire/uploader un exe non signe par defaut ;
+- `.gitignore` exclut `*.pfx`/`*.p12`/`*.key` sans exclure automatiquement `.cer`/`.crt` ;
+- aucun fichier `.pfx`/`.p12`/`.key` ni aucun marqueur `BEGIN PRIVATE KEY` n'est suivi par Git (verifie via `git ls-files` / `git grep`) ;
+- `docs/CODE_SIGNING.md` existe et couvre Timestamp/SmartScreen/GitHub Actions/certificat auto-signe.
+
 ## Gaps connus
 
 - Pas encore de tests UI automatises : le build PySide6 local ne fournit pas de plugin platform `offscreen` ou `minimal`.
-- Pas encore de validation Windows Credential Manager automatisee (les tests `test_secrets.py` valident `GraphSecretStore` via un faux backend, pas `keyring.backends.Windows.WinVaultKeyring` reel).
-- Pas encore de tests contre un tenant de sandbox reel (Intune, Entra ID et Autopilot). Aucune App Registration n'existe encore cote tenant au 2026-09-14 ; toute la couverture Phase 1 a 7 (190 tests au total) repose sur des transports/clients Graph factices.
+- Validation Windows Credential Manager : `tests/test_secrets.py` valide `GraphSecretStore` via un faux backend en memoire ; le backend reel `keyring.backends.Windows.WinVaultKeyring` a ete confirme reellement resolu et fonctionnel (round-trip d'un secret de test) sur Windows lors de la Phase 7.1 (voir `docs/PACKAGING.md`), hors du cadre de la suite pytest.
+- Pas encore de tests contre un tenant de sandbox reel (Intune, Entra ID et Autopilot). Aucune App Registration n'existe encore cote tenant au 2026-09-15 ; toute la couverture Phase 1 a 7.2 (206 tests au total) repose sur des transports/clients Graph factices ou des assertions structurelles - jamais un vrai tenant.
 - Pas encore de tests UI automatises pour Refresh et tabs Device Inspector / Autopilot / Entra ID / Appareil ; la logique sous-jacente est couverte par tests metier mockes.
 - Autopilot specifiquement non valide contre un vrai tenant : recherche multi-identifiant, `contains(serialNumber, ...)` avec des serials reels, appel beta du profil, et surtout le risque de faux positif documente sur `identifier_mismatch` (voir `docs/GRAPH_PERMISSIONS.md`, section Validation tenant reel).
 - Entra ID specifiquement non valide contre un vrai tenant : recherche par `displayName` (egalite exacte - comportement reel non confirme), `deviceId eq` sur devices, et la definition du seuil "stale" a 90 jours (jamais confrontee a des dates de connexion reelles).
 - Device Workspace herite integralement des inconnues de validation d'Autopilot et d'Entra ID ci-dessus, puisqu'il ne fait qu'orchestrer ces deux modules et Intune ; aucun comportement de resolution/priorisation propre au Workspace n'a ete confronte a un tenant reel non plus (voir `docs/GRAPH_PERMISSIONS.md`, section Validation tenant reel).
-- Packaging Windows (Phase 7) : aucun build Windows reel n'a ete effectue (PyInstoller ne cross-compile pas depuis macOS/Linux) ; seul un build structurel macOS a ete verifie (voir `docs/PACKAGING.md`, "Build reellement effectue"). La checklist de validation manuelle Windows 11 (`docs/PACKAGING.md`) n'a pas ete executee.
+- Packaging Windows (Phase 7) : build Windows reel effectue avec succes en Phase 7.1 (GitHub Actions, 2026-09-15) ; validation Windows 11 desktop interactive partiellement effectuee - voir `docs/PACKAGING.md` pour le detail exact de ce qui reste a un humain.
+- Code Signing (Phase 7.2) : les 16 tests sont structurels (fichiers texte, git) - **aucun ne signe reellement un binaire** (necessite Windows + signtool + un certificat, ce que pytest ne peut pas mocker de maniere honnete). Le statut de validation Authenticode reelle est documente dans `docs/CODE_SIGNING.md` ("Etat reel de cette phase") et `NEXT.md`, jamais dans la suite de tests.

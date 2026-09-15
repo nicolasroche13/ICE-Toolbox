@@ -141,3 +141,13 @@ Pour etendre la vue "Appareil" (Phase 6) :
 4. Avant d'ajouter une nouvelle dependance runtime (`requirements.txt`), verifier qu'un hook PyInstoller existe (integre ou via `pyinstaller-hooks-contrib`) ; sinon, `packaging/windows/EndpointToolbox.spec` devra declarer explicitement les `hiddenimports`/`datas` necessaires, comme deja fait pour `keyring.backends`.
 5. Ne jamais stocker de configuration ou de secret a cote de l'executable (`sys.executable`) : toujours via `app.core.paths.user_data_dir()` (configuration) ou `keyring` (secret).
 6. Relire `docs/PACKAGING.md` avant toute modification du `.spec` ou du script de build - il documente le detail de chaque choix et la checklist de validation manuelle Windows 11 a refaire.
+
+## Signer un build Windows (Phase 7.2, optionnel)
+
+1. Lire `docs/CODE_SIGNING.md` en entier avant toute modification des scripts de signature - il documente les garanties/limites d'Authenticode, les 3 modes de certificat, les 4 cas SmartScreen et la procedure complete.
+2. Pour un certificat de test local : `powershell -ExecutionPolicy Bypass -File scripts\create_test_codesigning_cert.ps1`, puis noter le thumbprint affiche.
+3. Signer : `powershell -ExecutionPolicy Bypass -File scripts\sign_windows.ps1 -Path dist\EndpointToolbox.exe -CertificateThumbprint <thumbprint>` (ajouter `-TimestampUrl` si une autorite de timestamp reelle est disponible - n'en invente jamais une, voir D041). Ou definir `$env:CODESIGN_THUMBPRINT` avant `scripts\build_windows.ps1` pour signer automatiquement en derniere etape du build.
+4. Ne jamais signer avant PyInstoller, ne jamais modifier `EndpointToolbox.exe` apres signature (invaliderait la signature).
+5. Verifier avec `scripts\verify_windows_signature.ps1 -Path dist\EndpointToolbox.exe` (ou directement `Get-AuthenticodeSignature` / `signtool verify /pa /v`).
+6. Ne jamais coder un thumbprint ou une URL de timestamp en dur dans un script (D041) ; ne jamais ajouter de PFX, mot de passe ou cle privee au depot ou a un workflow GitHub Actions (D042) ; ne jamais faire modifier Trusted Root/Trusted Publishers par un script (D043).
+7. Pour GitHub Actions, la seule variable a definir est `vars.CODESIGN_THUMBPRINT` (et optionnellement `vars.CODESIGN_TIMESTAMP_URL`) sur un runner self-hosted dont le magasin de certificats local contient deja le certificat - jamais un secret contenant un PFX.

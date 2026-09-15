@@ -115,9 +115,9 @@ Endpoint Toolbox peut etre compile en `EndpointToolbox.exe` autonome (Windows 11
 powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1
 ```
 
-Le script installe les dependances, lance les tests, puis compile via PyInstoller (`packaging/windows/EndpointToolbox.spec`). Doit s'executer sur Windows - PyInstoller ne cross-compile pas. Configuration et logs vont dans `%APPDATA%\EndpointToolbox\` (jamais a cote de l'executable) ; le Client Secret reste dans Windows Credential Manager, jamais dans `graph_config.json`. Detail complet, metadonnees de l'executable et checklist de validation manuelle Windows 11 : `docs/PACKAGING.md`.
+Le script installe les dependances, lance les tests, puis compile via PyInstoller (`packaging/windows/EndpointToolbox.spec`), et signe l'executable si (et seulement si) un certificat de signature est configure (voir `docs/CODE_SIGNING.md`) - aucun certificat n'est requis pour compiler. Doit s'executer sur Windows - PyInstoller ne cross-compile pas. Configuration et logs vont dans `%APPDATA%\EndpointToolbox\` (jamais a cote de l'executable) ; le Client Secret reste dans Windows Credential Manager, jamais dans `graph_config.json`. Detail complet, metadonnees de l'executable et checklist de validation manuelle Windows 11 : `docs/PACKAGING.md`.
 
-**Aucun build Windows reel n'a ete effectue a ce jour** (prepare et teste structurellement sur macOS uniquement) - voir `docs/PACKAGING.md` et `NEXT.md`.
+Un build Windows reel a ete effectue avec succes le 2026-09-15 via GitHub Actions (`EndpointToolbox.exe`, 190 tests verts sur Windows reel) - voir `docs/PACKAGING.md` pour le detail exact et ce qui reste a valider par un humain sur un poste Windows 11 interactif. La signature de code reste optionnelle et son statut reel est documente dans `docs/CODE_SIGNING.md` et `NEXT.md`.
 
 ## Tests
 
@@ -143,3 +143,4 @@ Avec le virtualenv local :
 - `docs/DEVELOPMENT.md` : guide de reprise.
 - `docs/TESTING.md` : strategie de tests.
 - `docs/PACKAGING.md` : packaging Windows portable (PyInstoller, chemins frozen, Credential Manager, checklist de validation).
+- `docs/CODE_SIGNING.md` : signature Authenticode optionnelle (certificat test/interne/public, timestamp, SmartScreen, GitHub Actions).

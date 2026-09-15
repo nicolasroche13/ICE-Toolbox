@@ -119,12 +119,26 @@ Statut : packaging prepare (macOS) ; **build Windows reel effectue avec succes e
 - `app/core/logging_setup.py` (nouveau) : filet de securite minimal (fichier de log tournant + `sys.excepthook`), necessaire car l'executable est sans console (D036). Aucune donnee Graph ni secret n'y transite.
 - `app/version.py` (nouveau) : source unique de version pour les metadonnees de l'executable (D037), independante des marqueurs `APP_VERSION` par module deja existants.
 - Icone : mecanisme d'ajout prepare (`resources/windows/app.ico` si present), aucune icone inventee (D038).
-- Aucune signature de code (D039) ; SmartScreen avertira au premier lancement, documente comme comportement attendu.
+- Aucune signature de code dans cette phase (D039) ; SmartScreen avertira au premier lancement, documente comme comportement attendu. Voir Phase 7.2 pour l'infrastructure de signature optionnelle ajoutee ensuite.
 - `scripts/build_windows.ps1` : build reproductible (venv, dependances, tests, `compileall`, PyInstoller), refuse de s'executer hors Windows.
 - `.github/workflows/windows-build.yml` : workflow manuel (`workflow_dispatch` uniquement), aucun secret, aucune publication de Release.
 - 31 tests dedies (`tests/test_paths.py`, `tests/test_secrets.py`, `tests/test_config_store.py`, `tests/test_logging_setup.py`) : resolution de chemins dev/frozen, comportements du Credential Manager (present/absent/supprime/mis a jour/indisponible), absence du secret dans `graph_config.json` et dans les logs. Les 190 tests du projet (dont ces 31) sont verts sur Windows reel (Phase 7.1).
 - `.github/workflows/windows-validate.yml` (Phase 7.1, nouveau) : workflow manuel de validation - backend keyring, round-trip Credential Manager avec un secret de test non sensible, Support Bundle synthetique, AppData/logs, scan Defender non interactif.
 - Build reellement effectue : **oui, en Phase 7.1 (2026-09-15)** via GitHub Actions `windows-latest` - `EndpointToolbox.exe` produit (77 275 947 octets, SHA-256 `7ced561a47eb52357b6b7952a64adb1a8f1ff75f0149bed1e1faefff53f81374`), 190 tests verts sur Windows reel, aucune correction necessaire. Ce runner est un Windows Server cloud, pas un poste Windows 11 desktop interactif - voir `docs/PACKAGING.md` pour le detail exact de ce qui reste a valider par un humain.
+
+## Phase 7.2 - Signature Authenticode optionnelle read-only
+
+Statut : infrastructure de signature preparee ; statut de validation reelle detaille dans `docs/CODE_SIGNING.md` ("Etat reel de cette phase") et `NEXT.md`. Aucune fonctionnalite metier, aucune permission Graph, aucune ecriture Graph n'a ete ajoutee - strictement de la signature de code.
+
+- `scripts/create_test_codesigning_cert.ps1` (nouveau) : cree un certificat Code Signing SHA-256 auto-signe, clairement marque TEST/DO NOT TRUST, stocke dans `Cert:\CurrentUser\My`, cle privee jamais exportee, aucune modification de Trusted Root/Publishers (D043).
+- `scripts/sign_windows.ps1` (nouveau) : signe un `.exe` avec un certificat du magasin Windows identifie uniquement par thumbprint (jamais code en dur, D041), SHA-256, timestamp RFC 3161 optionnel (aucune URL par defaut, D041), verifie immediatement le resultat et echoue avec un code non nul si la verification n'est pas `Valid`.
+- `scripts/verify_windows_signature.ps1` (nouveau) : verification independante (`Get-AuthenticodeSignature` + `signtool verify /pa /v`), classification explicite UNSIGNED/VALID/INVALID/UNKNOWN-UNTRUSTED/EXPIRED.
+- `scripts/build_windows.ps1` : signature optionnelle en toute derniere etape (apres PyInstoller), activee uniquement si `CODESIGN_THUMBPRINT` est definie ; sans elle, l'executable reste non signe exactement comme avant - aucun certificat requis pour compiler (D040).
+- `.github/workflows/windows-build.yml` : etape de signature conditionnelle a `vars.CODESIGN_THUMBPRINT` (variable de depot, jamais un secret), no-op par defaut, concue pour un runner self-hosted avec magasin de certificats local (D042). Aucun PFX, mot de passe ou cle privee ajoute au workflow ou au depot.
+- `docs/CODE_SIGNING.md` (nouveau) : reference complete - pourquoi signer, garanties et limites d'Authenticode, les 3 modes de certificat (test/interne/public), les 4 cas SmartScreen, timestamp, procedures de signature/verification, stockage securise de la cle privee, GitHub Actions, procedure future pour certificat public, rotation/expiration.
+- `.gitignore` : `*.pfx`, `*.p12`, `*.key` ignores ; `.cer`/`.crt` (certificats publics, non secrets) deliberement non ignores.
+- Tests dedies (`tests/test_code_signing_structure.py`) : build sans certificat reste possible, parametres de signature jamais codes en dur, scripts refusent un fichier inexistant, workflow GitHub Actions garde par une variable et non un secret, aucun PFX/cle privee suivi par Git, documentation presente.
+- Signature reelle effectuee : voir `docs/CODE_SIGNING.md` ("Etat reel de cette phase") et `NEXT.md` pour le statut exact - jamais presumee sans preuve concrete consignee.
 
 ## Phase 8 - Entra ID au-dela de l'inspection device (hors perimetre actuel)
 

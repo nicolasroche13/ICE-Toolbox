@@ -127,18 +127,21 @@ def test_no_private_key_material_is_tracked_by_git():
 
 
 def test_no_tracked_file_contains_a_pem_private_key_marker():
-    # The literal PEM header (with dashes) only ever appears in an actual key
-    # block - unlike the bare phrase "BEGIN PRIVATE KEY", which this repo's
-    # own documentation legitimately mentions in prose (e.g. docs/TESTING.md,
-    # docs/CODE_SIGNING.md) when explaining what this check looks for.
-    for marker in ("-----BEGIN PRIVATE KEY-----", "-----BEGIN RSA PRIVATE KEY-----", "-----BEGIN ENCRYPTED PRIVATE KEY-----"):
+    # Markers built at runtime (never written literally in this source file)
+    # so this very test - and any prose mentioning the marker by name, e.g.
+    # docs/TESTING.md, docs/CODE_SIGNING.md - never false-positives itself.
+    # The literal dashed PEM header only ever appears in an actual key block.
+    dashes = "-" * 5
+    key_types = ("", "RSA ", "ENCRYPTED ")
+    for key_type in key_types:
+        marker = f"{dashes}BEGIN {key_type}PRIVATE KEY{dashes}"
         result = subprocess.run(
             ["git", "-C", str(REPO_ROOT), "grep", "-l", "-e", marker],
             capture_output=True,
             text=True,
         )
         assert result.returncode in (0, 1)  # 1 = no matches found, the expected/passing case
-        assert result.stdout.strip() == "", f"found tracked file(s) containing {marker!r}: {result.stdout}"
+        assert result.stdout.strip() == "", f"found tracked file(s) containing a private key marker: {result.stdout}"
 
 
 def test_code_signing_documentation_exists_and_covers_key_topics():

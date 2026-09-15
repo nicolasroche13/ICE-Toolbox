@@ -220,8 +220,32 @@ Decision : `packaging/windows/EndpointToolbox.spec` verifie la presence de `reso
 
 Raison : consigne explicite ("Si une icone existe reellement, l'utiliser. Sinon ne genere pas arbitrairement une identite visuelle definitive"). Aucune icone Endpoint Toolbox n'existe dans ce depot a ce jour ; en creer une aurait fixe une identite visuelle non demandee et potentiellement a refaire.
 
-## D039 - Pas de signature de code dans cette phase
+## D039 - Pas de signature de code dans la Phase 7
 
-Decision : `EndpointToolbox.exe` n'est pas signe numeriquement. `docs/PACKAGING.md` documente explicitement que Windows SmartScreen avertira au premier lancement.
+Decision : `EndpointToolbox.exe` n'est pas signe numeriquement en Phase 7. `docs/PACKAGING.md` documente explicitement que Windows SmartScreen avertira au premier lancement.
 
-Raison : consigne explicite ("Ne signe pas numeriquement l'executable dans cette phase si aucun certificat de signature n'existe"). Aucun certificat de signature de code n'existe pour ce projet ; signer sans certificat reel est impossible, et en simuler un aurait ete une invention masquant une limitation reelle a l'utilisateur.
+Raison : consigne explicite ("Ne signe pas numeriquement l'executable dans cette phase si aucun certificat de signature n'existe"). Aucun certificat de signature de code n'existe pour ce projet a ce moment ; signer sans certificat reel est impossible, et en simuler un aurait ete une invention masquant une limitation reelle a l'utilisateur. **Superseded en partie par D040-D043 (Phase 7.2)** : l'infrastructure de signature optionnelle existe desormais, mais reste inactive par defaut - le raisonnement de D039 (ne jamais pretendre signer sans certificat reel) continue de s'appliquer telle quelle.
+
+## D040 - Signature Authenticode strictement optionnelle, jamais requise pour builder
+
+Decision : `scripts/build_windows.ps1` et `.github/workflows/windows-build.yml` produisent un `EndpointToolbox.exe` non signe par defaut. La signature ne se declenche que si `CODESIGN_THUMBPRINT` (variable d'environnement locale, ou variable de depot GitHub Actions `vars.CODESIGN_THUMBPRINT`) est explicitement definie.
+
+Raison : consigne explicite Phase 7.2 ("Un developpeur sans certificat doit toujours pouvoir compiler EndpointToolbox.exe"). Rendre la signature obligatoire aurait bloque tout contributeur sans certificat de signature - or aucun certificat reel (test ou public) n'est garanti disponible pour quiconque reprend ce depot.
+
+## D041 - Thumbprint en parametre explicite, jamais code en dur ; aucune URL de timestamp inventee
+
+Decision : `scripts/sign_windows.ps1` exige `-CertificateThumbprint` en parametre obligatoire (aucune valeur par defaut, aucun thumbprint litteral nulle part dans le code ou la documentation) et accepte `-TimestampUrl` en parametre optionnel sans URL par defaut.
+
+Raison : consigne explicite ("Le thumbprint ne doit pas etre code en dur" ; "IMPORTANT : ne pas inventer d'URL de serveur de timestamp"). Un thumbprint code en dur aurait suppose un certificat specifique n'existant potentiellement pas sur la machine du lecteur ; inventer une URL de timestamp aurait pu orienter silencieusement vers un service non choisi ou non approuve par l'utilisateur/le fournisseur reel du certificat.
+
+## D042 - Etape de signature GitHub Actions conditionnee a une variable, jamais a un secret PFX
+
+Decision : la nouvelle etape "Sign EndpointToolbox.exe" de `windows-build.yml` est gardee par `if: ${{ vars.CODESIGN_THUMBPRINT != '' }}` - une variable de depot/organisation GitHub Actions (non confidentielle), jamais un `secrets.*`. Aucun fichier PFX, mot de passe, cle privee ou credential de service de signature n'est ajoute au workflow ou au depot.
+
+Raison : consigne explicite ("Ne mets JAMAIS dans le repository : fichier PFX reel ; clé privee ; mot de passe PFX..." et "ne cree pas une architecture fragile consistant a stocker durablement une cle privee exportee dans le repository"). Un thumbprint identifie un certificat sans exposer de materiel cryptographique : ce n'est pas un secret, donc une variable simple est le bon niveau de confidentialite. Ce mecanisme est concu pour un runner self-hosted dont le magasin de certificats local detient deja le certificat ; sur le runner `windows-latest` heberge par GitHub (ephemere), l'activer sans un tel runner ferait simplement echouer l'etape (certificat introuvable) - un echec explicite plutot qu'une degradation silencieuse ou un contournement via un PFX importe a chaque run.
+
+## D043 - Scripts de signature ne modifient jamais Trusted Root/Trusted Publishers
+
+Decision : ni `scripts/create_test_codesigning_cert.ps1`, ni `scripts/sign_windows.ps1`, ni `scripts/verify_windows_signature.ps1` ne touchent aux magasins `Cert:\CurrentUser\Root`, `Cert:\LocalMachine\Root` ou Trusted Publishers - verifie explicitement par `tests/test_code_signing_structure.py::test_codesigning_scripts_never_touch_trusted_root_or_publisher_stores`.
+
+Raison : consigne explicite ("IMPORTANT : ne modifie pas automatiquement les Trusted Publishers/Trusted Root stores. Ne cree pas de script qui deploie silencieusement un certificat de confiance"). Etablir une confiance machine par machine est une decision de securite qui doit rester un acte deliberement pris par un administrateur (voir `docs/CODE_SIGNING.md`, section 11), jamais un effet de bord silencieux d'un script de build ou de signature.
